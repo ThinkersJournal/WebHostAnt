@@ -34,5 +34,5 @@ exist (all other Ants are 0.0.0 placeholders: stub behind a trait and say so). O
 PM allocates at gate). Memory rule: CARGO_BUILD_JOBS=2, one build at a time. Repos: ThinkersJournal/WebHostAnt, crate `webhostant` 0.0.0 published.
 
 ## State
-main = de284d2 (0.0.2). PR docs/contract-and-edge adds tasks 1 and 2 (0.0.3, PM allocates). Next: task 3 for the REMOTE-hosting contract only (types + conformance harness + compiled hello-world). Ruling: local serving/TLS waits for WebServAnt, which waits for HTTPAnt; Caddy optional external adapter (ROADMAP.md).
+main = de284d2 (0.0.2). PR docs/contract-and-edge adds tasks 1 and 2 (0.0.3, PM allocates). Next: task 3 for the REMOTE-hosting contract only, CLOUDFLARE as the only first target (Docker server waits for local serving; secrets pushed with manual-paste fallback; presence = one configuration-retrieval endpoint, see CONSUMER-CONTRACT 1a) (types + conformance harness + compiled hello-world). Ruling: local serving/TLS waits for WebServAnt, which waits for HTTPAnt; Caddy optional external adapter (ROADMAP.md).
 HTTPAnt is the real web-server-abstraction 1.0.2 moved to ThinkersJournal/httpant (PM); do not depend on it yet.

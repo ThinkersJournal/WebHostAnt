@@ -2,7 +2,7 @@
 
 ## [0.0.3] - 2026-10-28
 
-- `docs/CONSUMER-CONTRACT.md` (what a consumer provides and gets back, generalised from Humboldt's installer design) and `docs/EDGE-AND-AGNOSTICISM.md` (edge/TLS as a capability interface; updated for the build-order ruling: local serving waits for WebServAnt, which waits for HTTPAnt). Docs only.
+- `docs/CONSUMER-CONTRACT.md` (what a consumer provides and gets back, generalised from Humboldt's installer design) and `docs/EDGE-AND-AGNOSTICISM.md` (edge/TLS as a capability interface; updated for the rulings: Cloudflare only first, pushed secrets, presence = configuration request; local serving waits for WebServAnt, which waits for HTTPAnt). Docs only.
 
 ## [0.0.2] - 2026-10-28
 
