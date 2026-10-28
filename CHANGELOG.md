@@ -2,7 +2,7 @@
 
 ## [0.0.4] - 2026-10-28
 
-- Rulings applied (docs only): Cloudflare is the only first target, secrets are pushed with a manual-paste fallback, and the app-presence check is one configuration-retrieval endpoint (`docs/CONSUMER-CONTRACT.md` 1a, 2a).
+- Rulings applied (docs only): Cloudflare is the only first target, secrets are pushed with a manual-paste fallback, and presence is a host-side check then an authenticated configuration retrieval, with no unauthenticated tier (`docs/CONSUMER-CONTRACT.md` 1a, 2a).
 
 ## [0.0.3] - 2026-10-28
 
