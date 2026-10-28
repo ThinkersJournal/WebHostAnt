@@ -56,25 +56,28 @@ Interface (from DESIGN.md 5.3, unchanged): `ensure_certificate(names, challenge)
 conformance run is `Unverified` and refused. The consumer names a *need* ("automatic certificate for these names"); WebHostAnt picks a provider that
 satisfies it.
 
-## Is "WebServAnt" needed?
+## Is "WebServAnt" needed? Ruled: yes, and it comes first
 
-A standalone web server program that is library-agnostic *and* terminates TLS is exactly what falls out of HTTPAnt (agnostic server half) plus the
-in-process provider above. So it is not a separate idea; it is an *artifact* of those two parts, and building it first would mean building both
-before anyone needs it.
+CireSnave, 2026-10-28, first-hand, verbatim: *"I'm thinking WebHostAnt's local serving should wait until WebServAnt is available. Similarly, WebServAnt
+should wait until HTTPAnt is available. If we work it that way then we build the tools before we build what sits on top of them. WebHostAnt can still
+build the remote hosting portions before that."*
 
-## Options for CireSnave
+So the build order is **HTTPAnt -> WebServAnt -> WebHostAnt local serving and TLS**. WebServAnt (`ThinkersJournal/webservant`, crate `webservant`
+0.0.0, claimed 2026-10-28 per the PM) is the library-agnostic web server with an in-process certificate path; WebHostAnt does not build that path. HTTPAnt
+is the real `web-server-abstraction` 1.0.2 moved to `ThinkersJournal/httpant` (PM message, 2026-10-28; I did not re-read the moved repo), and its lane
+has started.
 
-**A. (Recommended) Capability interface now; no WebServAnt.** WebHostAnt defines the edge interface; first providers are Cloudflare (Humboldt
-already runs there) and Caddy (for the Docker server target); the in-process provider follows when a consumer wants one binary. Caddy is optional by
-construction. WebServAnt stays an idea. *Costs:* two providers to keep honest; nothing for someone who wants one file and no Caddy until later.
+**What this changes in this note:** the in-process provider in the table above is **WebServAnt's, not ours**, and is deferred until it exists. WebHostAnt
+keeps the edge *interface* (so the seam is fixed early) and builds only **remote** hosting adapters first: Cloudflare and remote Docker/server. Caddy
+stays an optional external adapter, never required. The earlier options are kept below as the record of what was offered.
 
-**B. In-process first, Caddy later.** Build the ACME path (learning from lightbulb) as the first provider so the first release has no outside program.
-*Costs:* we own renewal, storage, key handling and failure alerts ourselves, where certificate mistakes are most expensive; and it needs HTTPAnt or a
-fixed server choice to be useful, which today are not ready.
+## Options for CireSnave (superseded by the ruling above)
 
-**C. Create WebServAnt now** as its own project: an HTTPAnt-based server with in-process ACME that WebHostAnt then deploys like any app.
-*Costs:* a new project depending on two unfinished ones (HTTPAnt reshape, an ACME choice); delays Humboldt, which needs only a working edge. Revisit
-when HTTPAnt's server half and one in-process provider both exist; at that point it is a packaging step.
+**A. Capability interface now; WebServAnt deferred.** *Superseded: WebServAnt is wanted, and local serving waits for it.* The interface and the
+Cloudflare/Caddy providers part stands, with Caddy optional.
 
-**Recommendation: A.** It answers "Caddy must not be required" with a mechanism rather than a promise, and defers WebServAnt until its two parts exist.
-Needs from CireSnave: pick A, B or C. Needs from the PM: whether `httpant` crate and `web-server-abstraction` repo state above matches the roadmap's plan.
+**B. In-process first, Caddy later.** *Not chosen:* the in-process path belongs to WebServAnt.
+
+**C. Create WebServAnt now.** *Partly chosen:* WebServAnt exists as a claimed project, but waits for HTTPAnt; it is not built now.
+
+**Recommendation as now ruled:** edge interface in WebHostAnt; remote adapters first; local serving and TLS after WebServAnt.
