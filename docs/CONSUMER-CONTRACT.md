@@ -24,10 +24,20 @@ host.plan(&app)?.apply()?.read_back()?;                 // plan is inert; read-b
 | 4 | **A deployable artifact** (container image by digest, or a binary) | The thing to put on the host | Container built from the repo `Dockerfile` |
 | 5 | **A statement of data to protect** | Rollback and remove must never destroy it | A Postgres database; backups/restore not yet designed |
 | 6 | **Migration policy** (forward-only or reversible; whether older code refuses a newer schema) | Decides what rollback may promise | Forward-only; older code refuses a newer schema |
-| 7 | *(optional)* **Signature endpoint** `/.well-known/<app-id>` returning `app`, `setup`, and fields the app chooses | Lets a client choose install vs reconfigure | Proposed; **held pending board 318 — do not build on it yet** |
+| 7 | **A configuration-retrieval endpoint** (one path; see section 1a) | Answers "is our app here, and how is it configured?" and feeds reconfigure | Humboldt's proposed signature endpoint is the closest thing; **held pending board 318 — do not build on it yet** |
 
-A consumer with no signature endpoint still works: detection then relies on the host API alone (what is deployed under that name) plus `/health`, and
-WebHostAnt reports the weaker confidence rather than guessing.
+### 1a. Presence is a configuration request (ruled 2026-10-28)
+
+CireSnave, first-hand, verbatim: *"The 'is our app here' would likely be a configuration retrieval request ... it is needed for configuration."* So there
+is **one endpoint**, not a separate signature plus a settings reader:
+
+- **Unauthenticated, coarse:** `app` (the id), `setup` (`complete` or `needs-install`), and no more unless the consumer opts in (its version-disclosure choice, board 318).
+- **Authenticated administrator:** the full **non-secret** configuration (the settings of item 3, current values as the host serves them). Never a secret value; secrets appear by name and set/not-set only.
+- The unauthenticated answer is a **hint, never authority** (DESIGN.md 4.2); hosting-level changes still use the hosting credential against the host's API.
+
+A consumer with no such endpoint still works: detection then relies on the host API alone (what is deployed under that name) plus `/health`, and
+WebHostAnt reports the weaker confidence rather than guessing. This also covers ConfigurAnt's "write-back to non-file places" need (DESIGN.md 6.3 item 3): the
+authenticated answer is the read-only source of current values.
 
 ## 2. What WebHostAnt returns
 
@@ -41,6 +51,11 @@ Every operation is `plan` (inert data) then `apply`, then a **read-back**:
 - **Rollback:** switch to the retained previous artifact and configuration, then read health. It states **before apply** whether data can follow
   (the schema accepts the old code, or only a backup restore will do).
 - **Errors** say what the person should do next, and an operation an adapter does not support returns a named error, never a partial success.
+
+## 2a. Secrets are pushed (ruled 2026-10-28)
+
+CireSnave: *"Secrets should be pushed."* At deploy, WebHostAnt takes secret names and values from SecretAnt and writes them into the host's own store; where
+SecretAnt is not available, the **fallback is manual paste** into the host, with WebHostAnt listing only the names needed. Read-back confirms a name exists, never the value.
 
 ## 3. Rules WebHostAnt enforces on every consumer
 
@@ -65,6 +80,7 @@ assumes Humboldt can be bundled); outbound email policy (Humboldt must run with 
 
 ## 6. Open points
 
-- Does the consumer need WebHostAnt to run **on** the host (over SSH) or **against** it remotely? Installer design prefers on-the-box for Docker.
+- First target is **Cloudflare only**, so WebHostAnt runs *against* the host remotely; the on-the-box question returns with a Docker server, which waits for local serving.
 - Backup/restore is unspecified for Humboldt; WebHostAnt will call a consumer-provided backup hook only once one is defined (no schema invented here).
-- Signature endpoint fields wait on board 318.
+- The endpoint's exact fields and the version-disclosure choice wait on board 318.
+- Open for CireSnave (not decided): D6 real-target test account, D7 ConfigurAnt additions, D8 ReleaseAnt scope.

@@ -68,7 +68,7 @@ is the real `web-server-abstraction` 1.0.2 moved to `ThinkersJournal/httpant` (P
 has started.
 
 **What this changes in this note:** the in-process provider in the table above is **WebServAnt's, not ours**, and is deferred until it exists. WebHostAnt
-keeps the edge *interface* (so the seam is fixed early) and builds only **remote** hosting adapters first: Cloudflare and remote Docker/server. Caddy
+keeps the edge *interface* (so the seam is fixed early) and builds only **remote** hosting adapters first: **Cloudflare only** (CireSnave: *"Doesn't that negate the docker server?"*: a Docker server needs local serving or a TLS front, so it waits). Caddy
 stays an optional external adapter, never required. The earlier options are kept below as the record of what was offered.
 
 ## Options for CireSnave (superseded by the ruling above)
