@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.3] - 2026-10-28
+
+- `docs/CONSUMER-CONTRACT.md` (what a consumer provides and gets back, generalised from Humboldt's installer design) and `docs/EDGE-AND-AGNOSTICISM.md` (edge/TLS as a capability interface; options A/B/C for CireSnave). Docs only.
+
 ## [0.0.2] - 2026-10-28
 
 - HANDOFF for the new WebHostAnt lane; ROADMAP records the spin-out ruling (board 320). Docs only.

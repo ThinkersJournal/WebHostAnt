@@ -34,4 +34,5 @@ exist (all other Ants are 0.0.0 placeholders: stub behind a trait and say so). O
 PM allocates at gate). Memory rule: CARGO_BUILD_JOBS=2, one build at a time. Repos: ThinkersJournal/WebHostAnt, crate `webhostant` 0.0.0 published.
 
 ## State
-main = 4a93301 (0.0.1, design note). No open PRs. No lane existed before this one.
+main = de284d2 (0.0.2). PR docs/contract-and-edge adds tasks 1 and 2 (0.0.3, PM allocates). Next: task 3, contract types + conformance harness + compiled hello-world.
+Finding: local HTTPAnt checkout is still web-server-abstraction 1.0.2 (not a 0.0.0 placeholder); do not depend on it yet.
