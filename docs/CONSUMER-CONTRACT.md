@@ -24,10 +24,24 @@ host.plan(&app)?.apply()?.read_back()?;                 // plan is inert; read-b
 | 4 | **A deployable artifact** (container image by digest, or a binary) | The thing to put on the host | Container built from the repo `Dockerfile` |
 | 5 | **A statement of data to protect** | Rollback and remove must never destroy it | A Postgres database; backups/restore not yet designed |
 | 6 | **Migration policy** (forward-only or reversible; whether older code refuses a newer schema) | Decides what rollback may promise | Forward-only; older code refuses a newer schema |
-| 7 | *(optional)* **Signature endpoint** `/.well-known/<app-id>` returning `app`, `setup`, and fields the app chooses | Lets a client choose install vs reconfigure | Proposed; **held pending board 318 — do not build on it yet** |
+| 7 | **A configuration-retrieval endpoint** (one path; see section 1a) | Answers "how is our app configured?" to an authenticated admin only, and feeds reconfigure | Humboldt's proposed signature endpoint is the closest thing; **held pending board 318 — do not build on it yet** |
 
-A consumer with no signature endpoint still works: detection then relies on the host API alone (what is deployed under that name) plus `/health`, and
-WebHostAnt reports the weaker confidence rather than guessing.
+### 1a. Presence is host-side, then an authenticated configuration request (ruled 2026-10-28)
+
+CireSnave, first-hand, verbatim: *"why would an 'Is our app here?' respond at all to unauthenticated users?"* An unauthenticated answer only helps an
+attacker fingerprint the app, so **there is no unauthenticated tier**. (An earlier draft of this section had a coarse unauthenticated answer; that came
+from the PM's wording, not from the ruling, and is withdrawn.) Presence is two steps:
+
+1. **Host-side presence.** Ask the *host's* API, with the host credential the installer already holds, whether the app is deployed (Cloudflare: list the
+   Worker). The app takes no part.
+2. **Authenticated configuration retrieval.** One endpoint on the app, answered only to an authenticated administrator or an operator token. It returns the
+   app id, version, schema version and the full **non-secret** configuration (current values as the host serves them). Secrets appear by name and set/not-set
+   only, never a value. An unauthenticated request gets the app's normal response (401 or its public page) and nothing about version or schema.
+
+Hosting-level changes still use the hosting credential against the host's API (DESIGN.md 4.2). A consumer with no such endpoint still works: detection then
+relies on step 1 plus `/health`, and WebHostAnt reports the weaker confidence rather than guessing. The authenticated answer is also the read-only source of
+current values for ConfigurAnt's "write-back to non-file places" need (DESIGN.md 6.3 item 3). Exact fields and the version-disclosure choice (board 318) are
+now narrower: they concern only what an authenticated caller sees.
 
 ## 2. What WebHostAnt returns
 
@@ -36,11 +50,16 @@ Every operation is `plan` (inert data) then `apply`, then a **read-back**:
 - **Plan:** an ordered list of steps with their target, non-secret values, and secret **names** only; plus a hash so a tampered plan is refused.
 - **Apply result:** per step, what was actually found afterward (never "exit code 0"). Names set, never values.
 - **Idempotent:** the same plan applied twice changes nothing the second time.
-- **Detect:** what is deployed and, if the signature exists, its answer — labelled as a hint, never as authority.
+- **Detect:** what the host's API says is deployed; then, if the caller is authenticated, the app's configuration answer. No unauthenticated probe of the app is made to decide presence.
 - **Domain/TLS status:** names bound, certificate not-after date, issuer, last renewal result.
 - **Rollback:** switch to the retained previous artifact and configuration, then read health. It states **before apply** whether data can follow
   (the schema accepts the old code, or only a backup restore will do).
 - **Errors** say what the person should do next, and an operation an adapter does not support returns a named error, never a partial success.
+
+## 2a. Secrets are pushed (ruled 2026-10-28)
+
+CireSnave: *"Secrets should be pushed."* At deploy, WebHostAnt takes secret names and values from SecretAnt and writes them into the host's own store; where
+SecretAnt is not available, the **fallback is manual paste** into the host, with WebHostAnt listing only the names needed. Read-back confirms a name exists, never the value.
 
 ## 3. Rules WebHostAnt enforces on every consumer
 
@@ -65,6 +84,7 @@ assumes Humboldt can be bundled); outbound email policy (Humboldt must run with 
 
 ## 6. Open points
 
-- Does the consumer need WebHostAnt to run **on** the host (over SSH) or **against** it remotely? Installer design prefers on-the-box for Docker.
+- First target is **Cloudflare only**, so WebHostAnt runs *against* the host remotely; the on-the-box question returns with a Docker server, which waits for local serving.
 - Backup/restore is unspecified for Humboldt; WebHostAnt will call a consumer-provided backup hook only once one is defined (no schema invented here).
-- Signature endpoint fields wait on board 318.
+- The endpoint's exact fields and the version-disclosure choice wait on board 318.
+- Open for CireSnave (not decided): D6 real-target test account, D7 ConfigurAnt additions, D8 ReleaseAnt scope.

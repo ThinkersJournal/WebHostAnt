@@ -73,41 +73,41 @@ Deferred with no promise: Kubernetes, AWS or Azure app services, serverless with
 Read from INSTALLER-DESIGN and generalized (these are proposals, not built):
 
 - It listens on one HTTP port, configured by a setting, and answers a health path (`/health` exists in Humboldt and returns only `{"status":"ok"}`, read).
-- It exposes the **signature endpoint** of section 4.
+- It exposes the **authenticated configuration-retrieval endpoint** of section 4.
 - It declares its settings in a `configurant.toml` schema and marks which values are secret (section 6).
 - It states its data, so adapters know what a rollback must not destroy (section 9).
 - Migrations: forward-only is allowed but must be declared (Humboldt's are; older code refuses a newer schema, INSTALLER-DESIGN 6.1, read).
 
 ## 4. Detecting an existing install, safely
 
-### 4.1 The signature endpoint
+### 4.1 Presence: the host first, then an authenticated configuration request
 
-INSTALLER-DESIGN section 3.2 proposes `GET /.well-known/humboldt-pickup` returning `{ "app": "humboldt-pickup", "version": "0.11.89", "schema": 39, "setup": "complete" }`,
-and lists what must never be in it (school name, counts, addresses, people, secrets, build SHA, host name, database name or provider). WebHostAnt
-generalizes only the **shape**: `/.well-known/<app-id>`, a fixed `app` string, `version`, `setup` (`complete` or `needs-install`), plus app-specific
-numeric fields the app chooses (Humboldt's `schema`). The never-list becomes a rule the conformance suite tests: the app seeds data, then the test
-greps the response body for it (INSTALLER-DESIGN slice 2 does the same, read).
+**Withdrawn 2026-10-28:** an earlier version of this section (and INSTALLER-DESIGN 3.2) had an unauthenticated signature endpoint; CireSnave asked, first-hand,
+*"why would an 'Is our app here?' respond at all to unauthenticated users?"* — an unauthenticated answer only lets an attacker fingerprint the app. Presence is now:
 
-**What it reveals.** The version tells an attacker which known weaknesses apply. INSTALLER-DESIGN already puts that disclosure choice to the PM
-(its decision 4) and offers a coarse variant. WebHostAnt supports both: `version` may be omitted and `schema` coarse, and the installer then asks for
-sign-in to learn more. It must not decide this for the app.
+1. **Host-side.** Ask the host's API, with the host credential the installer already holds, whether the app is deployed (Cloudflare: list the Worker). The app takes no part.
+2. **Authenticated configuration retrieval.** One endpoint on the app, answered only to an authenticated administrator or an operator token, returning the app id, version,
+   schema version and the full non-secret configuration. An unauthenticated request gets the app's normal response (401 or its public page) and nothing about version or schema.
 
-### 4.2 The signature is a hint, never authority
+The never-list (school name, counts, addresses, people, secrets, build SHA, host name, database name or provider) still applies to the *unauthenticated* response, and the
+conformance suite tests it: the app seeds data, then the test greps an unauthenticated response body for it and for the app id and version (INSTALLER-DESIGN slice 2 does the
+same, read). Secrets appear in the authenticated answer by name and set/not-set only. Whether the authenticated answer includes `version` is the app's choice (D5). Full contract: `CONSUMER-CONTRACT.md` 1a.
 
-An unauthenticated endpoint can be copied by anyone. A hostile site can answer "I am humboldt-pickup, setup complete", and an installer that then
-signs in to "reconfigure" would send a district admin's password to the wrong place. So:
+### 4.2 Presence is never taken from the site's own say-so
 
-- The probe result only chooses a **screen** (clean install vs reconfigure). It never grants anything.
-- Hosting-level changes use the **hosting credential against the host's own API** (Cloudflare token to Cloudflare, local Docker socket), not against the probed URL. The adapter checks that the deployment it finds in the host API is the one serving that URL (for example, the Worker's route or the container's published host name matches) before it believes the probe.
-- In-app sign-in goes only to a URL the person typed **and** that matched in the previous step, `https` only, with no redirect to another host (INSTALLER-DESIGN section 3.3, read).
-- If the installer ever runs on a server (for example inside SecretAnt's web UI), a probe of a person-supplied URL is a request forgery risk. Rule: a server-side probe refuses private, loopback and link-local addresses unless the operator turned that on, and resolves the name once and connects to that address.
+A hostile site can claim to be ours, and an installer that then signs in to "reconfigure" would send a district admin's password to the wrong place. So:
+
+- Presence is decided by the **host's API** (4.1 step 1), which no site can forge. The app is never asked to vouch for itself to an unauthenticated caller.
+- Hosting-level changes use the **hosting credential against the host's own API** (Cloudflare token to Cloudflare), not against the site's URL. The adapter checks that the deployment it finds in the host API is the one serving that URL (for example, the Worker's route matches) before it sends any sign-in there.
+- In-app sign-in goes only to a URL the person typed **and** that the host API confirmed, `https` only, with no redirect to another host (INSTALLER-DESIGN section 3.3, read).
+- If the installer ever runs on a server (for example inside SecretAnt's web UI), a request to a person-supplied URL is a request forgery risk. Rule: a server-side request refuses private, loopback and link-local addresses unless the operator turned that on, and resolves the name once and connects to that address.
 
 ### 4.3 The decision table
 
-Taken from INSTALLER-DESIGN 3.3 (read), unchanged in substance: nothing answers and the data store is empty means clean install; ours means
-reconfigure or upgrade and **never** a clean-install or wipe tool; not ours means stop; ours but `needs-install` means finish; unreachable means say which
-of network, TLS or DNS failed. Its rule about control hosts carries over: **"nothing there" is believed only if a control URL known to answer is
-reachable from the same machine in the same run.** Without that, a laptop on a school network that blocks outbound traffic would report "not installed"
+From INSTALLER-DESIGN 3.3 (read), changed where 4.1 requires: **host says nothing deployed under that name and the data store is empty** means clean install; **host says ours** (and, once
+authenticated, the app's answer agrees) means reconfigure or upgrade and **never** a clean-install or wipe tool; a deployment that is not ours means stop; ours but
+`needs-install` means finish; unreachable means say which of network, TLS or DNS failed. Its rule about control hosts carries over: **"nothing there" is believed only if a
+control URL known to answer is reachable from the same machine in the same run.** Without that, a laptop on a school network that blocks outbound traffic would report "not installed"
 and then try a clean install over a live site.
 
 ## 5. Local hosting and automatic TLS
@@ -237,8 +237,8 @@ a school's first install.
 
 | Ant | Use here | State read |
 |---|---|---|
-| HTTPAnt (core, server, client) | The SecretAnt web UI and the signature endpoint are written against its server half, so WebHostAnt hosts whichever adapter is chosen. WebHostAnt itself does not wrap HTTP servers | Roadmap row "confirmed; repo to be moved"; no checkout exists locally; shape **UNVERIFIED** |
-| APIAnt | Health, rate limit and versioning for the signature and status endpoints; rate limiting matters because the signature is unauthenticated | Roadmap row "name claimed" |
+| HTTPAnt (core, server, client) | The SecretAnt web UI and the configuration-retrieval endpoint are written against its server half, so WebHostAnt hosts whichever adapter is chosen. WebHostAnt itself does not wrap HTTP servers | Roadmap row "confirmed; repo to be moved"; no checkout exists locally; shape **UNVERIFIED** |
+| APIAnt | Health, rate limit and versioning for the configuration-retrieval and status endpoints; rate limiting matters because authentication attempts arrive there | Roadmap row "name claimed" |
 | SupervisorAnt | Keeps the app and the TLS front door running and starts them on boot in local mode | Roadmap row says survey first; nothing built. **Until it exists, the local adapter generates a service definition for the OS** and says so |
 | AuditAnt | Events: plan shown, plan approved, apply, each step, read-back, rollback, certificate issued or failed, secret pushed (names only). Credential identified by fingerprint, never value | "name claimed", nothing read beyond the roadmap row |
 | RedactAnt | Wraps tokens and URLs so a tool's output (for example from `wrangler` or Docker) is scrubbed before it is stored or shown; INSTALLER-DESIGN's doctor report has the same need | "name queued" |
@@ -251,7 +251,7 @@ a school's first install.
 
 An adapter is a provider in CapAnt's sense (data, with a separate prober). Operation ids are open strings. The first set:
 
-`detect.list`, `detect.url`, `plan`, `deploy.image`, `deploy.binary`, `env.set`, `secret.set`, `secret.list_names`, `secret.delete`,
+`detect.list`, `detect.config` (authenticated retrieval), `plan`, `deploy.image`, `deploy.binary`, `env.set`, `secret.set`, `secret.list_names`, `secret.delete`,
 `domain.bind`, `tls.auto`, `tls.status`, `health.read`, `logs.read`, `rollback.previous`, `remove`.
 
 Each operation is a pure request to produce a **plan step** (data), then a separate `apply(step)`; no adapter acts during `plan`. Every `apply` returns a
@@ -295,7 +295,7 @@ which does not exist (**UNVERIFIED**) and is a decision (section 15).
 ### 9.1 Upgrade (generalized from INSTALLER-DESIGN 6.1, read)
 
 Probe installed `version` and schema, refuse a downgrade, back up and read the backup back, show the migrations that will run and any marked
-irreversible, deploy the new artifact, wait for health and for the signature to report the new version, read back, keep the backup.
+irreversible, deploy the new artifact, wait for health and for the authenticated configuration answer to report the new version, read back, keep the backup.
 
 ### 9.2 Rollback, and its honest limit
 
@@ -312,7 +312,7 @@ irreversible, deploy the new artifact, wait for health and for the signature to 
 | Threat | Example | Mitigation |
 |---|---|---|
 | **Hostile network** | A school network that strips or intercepts TLS; spoofed DNS during the probe | `https` only; verify the certificate chain and name; no redirect to another host; the control-host rule (4.3); never send a credential to a URL the host API did not confirm (4.2) |
-| **Hostile site pretending to be ours** | Copies the signature endpoint | Signature is a hint only (4.2) |
+| **Hostile site pretending to be ours** | Answers the installer's requests as if it were the app | Presence comes from the host's API, not from the site (4.2); the app is asked only for authenticated retrieval, at a URL the host API confirmed |
 | **Server-side request forgery** | A web UI that probes a person-supplied URL | Refuse private, loopback and link-local targets by default; pin the resolved address |
 | **Stolen deploy credential** | A leaked Cloudflare token or a DNS token | Use least-privilege tokens and say which rights are needed; credentials are read for one run and not stored (INSTALLER-DESIGN section 4, read); an audit event per use; rotation steps in the docs; DNS tokens limited to one zone where the provider allows |
 | **Tampered artifact** | A modified installer binary or image | Published checksums at minimum; a pinned image **digest**, never a tag; build in CI; signing is a money decision shared with the installer (INSTALLER-DESIGN 7.2, read); verify before run. Signature scheme choice **UNVERIFIED** |
@@ -334,7 +334,7 @@ Nothing in this project needs to wait for them to **start**, if each dependency 
 | SecretAnt | Environment variables and the `file` source | SecretAnt design and adapter crate exist (its adapter row is held on SecretAnt being on crates.io, read) |
 | AuditAnt, RedactAnt | A trait that receives events and a wrapper type whose `Debug` shows nothing | Both published |
 | SupervisorAnt | Generated service files | Its survey and first slice |
-| HTTPAnt | None: WebHostAnt does not use it in slice 1 | The SecretAnt UI and the signature endpoint are written |
+| HTTPAnt | None: WebHostAnt does not use it in slice 1 | The SecretAnt UI and the configuration-retrieval endpoint are written |
 | Caddy | A version-pinned download in a documented path, checked by hash | Option C trait gains a second provider |
 
 ## 12. Effort slices
@@ -345,7 +345,7 @@ Sizes are guesses (**UNVERIFIED**): S is days, M is a couple of weeks, L is long
 |---|---|---|---|
 | 0 | Decisions in section 15; patent sweep rows run (section 14) | S | CireSnave |
 | 1 | Contract crate: operation ids, plan-step types, capability rows, the conformance suite harness, a fake target; no real adapter | M | CapAnt stub |
-| 2 | Signature endpoint spec and a test helper (the seed-and-grep never-list test) | S | none |
+| 2 | Authenticated configuration-retrieval spec and a test helper (the seed-and-grep never-list test, plus a test that an unauthenticated request learns nothing) | S | none |
 | 3 | The Docker-server adapter, built **inside the Humboldt installer first**, against the rehearsal stack; production compose with Caddy | L | Humboldt slices 1 and 3 |
 | 4 | Local TLS: the trait and the Caddy provider, staging-CA test, renewal monitor, status | L | slice 1 |
 | 5 | Cloudflare adapter, after the two UNVERIFIED facts in 3.1 are checked | M | Humboldt slice 5 |
@@ -376,7 +376,7 @@ record in `PATENT-SWEEP.md`, and re-run when slice 4 adds certificate behaviour.
 2. Automated deployment of a web application to a plurality of hosting providers through provider-specific adapters selected by capability.
 3. Automated issuance, renewal and installation of a TLS certificate by a hosting tool using a domain-validation challenge (HTTP, TLS-ALPN, DNS), including a staging-first check.
 4. Pushing secrets from a secrets manager into a hosting provider's secret store at deployment time without exposing them to the deployer's logs.
-5. A signature or identification endpoint of a web application used by a client to determine version and setup state without authentication.
+5. An authenticated configuration-retrieval endpoint of a web application used by a client, after a host-side presence check, to determine version, schema and setup state.
 6. Rollback of a deployment by switching to a retained previous artifact after a failed health check, with data-schema compatibility checking.
 7. Capability matrix with evidence used to select among deployment providers and reject unproven operations.
 8. Hosting a management web interface bound to loopback on first run with a one-time token, then exposing it publicly with an automatically obtained certificate.
@@ -404,9 +404,9 @@ A. Run Caddy beside the app as a separate program we configure. B. Build certifi
 A. Push from SecretAnt into the host's own secret store at deploy time (the PM's default). B. The running app asks SecretAnt for its secrets when it starts. C. The person pastes secrets into the host's dashboard by hand, and we only list the names they need.
 **Recommended: A**, with C as the always-available fallback while SecretAnt is not built. B adds a server that must be up and reachable for the app to start, which a school cannot be expected to run.
 
-**D5. Does the unauthenticated signature endpoint report the full version?**
-A. Yes, full version and schema, so the installer can tell a school it is out of date. B. Only that the app is ours and a coarse state; more after sign-in. C. Let each app choose, with A as the default.
-**Recommended: C.** It is the same question Humboldt's installer note already put to the PM. A public version helps defenders and attackers alike; an app with more sensitive data may prefer B.
+**D5. Does the authenticated configuration answer report the full version?** (An unauthenticated tier was withdrawn 2026-10-28; see 4.1.)
+A. Yes, full version and schema to an authenticated caller, so the installer can tell a school it is out of date. B. Only that the app is ours and a coarse state, even to an authenticated caller. C. Let each app choose, with A as the default.
+**Recommended: C**, but note the question now concerns only what an *authenticated* caller sees (withdrawal note in 4.1). A version helps defenders and attackers alike; an app with more sensitive data may omit it even for admins.
 
 **D6. What do we do about the real-target tests that need accounts?**
 A. Create a dedicated test Cloudflare account and token held in the secrets store, and run real tests on the self-hosted runner. B. Test only against fakes and run the real target by hand before each release. C. Skip real-target tests for now.
