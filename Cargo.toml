@@ -1,8 +1,8 @@
 [package]
 name = "webhostant"
-version = "0.0.4"
+version = "0.0.5"
 edition = "2024"
-description = "Reserved name: deploy a web app to common hosts or serve it locally with automatic TLS. Placeholder, no functionality yet."
+description = "Deploy a web app to a host and prove it is there: plan, apply, read back, with a conformance suite for host adapters. Early: no real host adapter yet."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ThinkersJournal/WebHostAnt"
 readme = "README.md"
