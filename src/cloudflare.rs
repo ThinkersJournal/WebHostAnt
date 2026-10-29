@@ -9,8 +9,10 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
@@ -55,9 +57,29 @@ pub trait Runner {
     fn run(&self, call: &Call) -> Result<Output, Error>;
 }
 
-/// Runs `wrangler` from the `PATH`.
-#[derive(Debug, Clone, Default)]
-pub struct ProcessRunner;
+/// How long one `wrangler` call may run before it is stopped. Generous because a container deploy builds an image.
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// Runs `wrangler` from the `PATH`, stopping any call that outlives its time limit.
+#[derive(Debug, Clone)]
+pub struct ProcessRunner {
+    timeout: Duration,
+}
+
+impl Default for ProcessRunner {
+    fn default() -> Self {
+        Self {
+            timeout: DEFAULT_TIMEOUT,
+        }
+    }
+}
+
+impl ProcessRunner {
+    /// A runner that stops each call after `timeout`.
+    pub fn with_timeout(timeout: Duration) -> Self {
+        Self { timeout }
+    }
+}
 
 impl Runner for ProcessRunner {
     fn run(&self, call: &Call) -> Result<Output, Error> {
@@ -69,34 +91,87 @@ impl Runner for ProcessRunner {
         } else {
             Command::new("wrangler")
         };
-        cmd.args(&call.args)
-            .stdin(if call.stdin.is_some() {
-                Stdio::piped()
-            } else {
-                Stdio::null()
-            })
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        let mut child = cmd.spawn().map_err(|e| {
-            Error::Target(format!(
-                "could not start wrangler ({e}); is Node and wrangler installed?"
-            ))
-        })?;
-        if let (Some(secret), Some(mut stdin)) = (&call.stdin, child.stdin.take()) {
-            use std::io::Write;
-            stdin
-                .write_all(secret.expose().as_bytes())
-                .map_err(|e| Error::Target(format!("could not pass input to wrangler: {e}")))?;
-        }
-        let out = child
-            .wait_with_output()
-            .map_err(|e| Error::Target(format!("wrangler did not finish: {e}")))?;
-        Ok(Output {
-            success: out.status.success(),
-            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-        })
+        cmd.args(&call.args);
+        run_bounded(
+            cmd,
+            call.stdin.as_ref(),
+            self.timeout,
+            &format!("wrangler {}", call.args.join(" ")),
+        )
     }
+}
+
+/// Run `cmd`, feeding it `stdin`, and stop it (and its children) if it has not exited within `timeout`.
+fn run_bounded(
+    mut cmd: Command,
+    stdin: Option<&SecretValue>,
+    timeout: Duration,
+    label: &str,
+) -> Result<Output, Error> {
+    cmd.stdin(if stdin.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    })
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e| {
+        Error::Target(format!(
+            "could not start wrangler ({e}); is Node and wrangler installed?"
+        ))
+    })?;
+    if let (Some(secret), Some(mut pipe)) = (stdin, child.stdin.take()) {
+        use std::io::Write;
+        pipe.write_all(secret.expose().as_bytes())
+            .map_err(|e| Error::Target(format!("could not pass input to wrangler: {e}")))?;
+    }
+    let out = drain(child.stdout.take());
+    let err = drain(child.stderr.take());
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if Instant::now() >= deadline => break None,
+            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            Err(e) => return Err(Error::Target(format!("wrangler did not finish: {e}"))),
+        }
+    };
+    let Some(status) = status else {
+        kill_tree(&mut child);
+        let _ = child.wait();
+        return Err(Error::TimedOut {
+            what: label.to_string(),
+            after: timeout,
+        });
+    };
+    Ok(Output {
+        success: status.success(),
+        stdout: out.join().unwrap_or_default(),
+        stderr: err.join().unwrap_or_default(),
+    })
+}
+
+/// Read a pipe to the end on its own thread, so a full pipe never stalls the child.
+fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> std::thread::JoinHandle<String> {
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(mut p) = pipe {
+            let _ = p.read_to_end(&mut bytes);
+        }
+        String::from_utf8_lossy(&bytes).into_owned()
+    })
+}
+
+/// Stop the child and what it started; on Windows `cmd` leaves `node` running if only `cmd` is killed.
+fn kill_tree(child: &mut std::process::Child) {
+    if cfg!(windows) {
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
 }
 
 /// A Cloudflare Worker, driven through a [`Runner`].
@@ -523,5 +598,47 @@ mod tests {
             stdin: Some(SecretValue::new("CANARY-xyz")),
         };
         assert!(!format!("{c:?}").contains("CANARY-xyz"));
+    }
+
+    #[test]
+    fn a_call_that_outlives_its_limit_is_stopped_and_reported() {
+        let cmd = if cfg!(windows) {
+            let mut c = Command::new("ping");
+            c.args(["-n", "30", "127.0.0.1"]);
+            c
+        } else {
+            let mut c = Command::new("sleep");
+            c.arg("30");
+            c
+        };
+        let started = Instant::now();
+        let e = run_bounded(cmd, None, Duration::from_millis(300), "slow thing").unwrap_err();
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "was not stopped"
+        );
+        assert_eq!(
+            e,
+            Error::TimedOut {
+                what: "slow thing".into(),
+                after: Duration::from_millis(300)
+            }
+        );
+    }
+
+    #[test]
+    fn a_call_that_finishes_in_time_returns_its_output() {
+        let cmd = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.args(["/C", "echo hi"]);
+            c
+        } else {
+            let mut c = Command::new("echo");
+            c.arg("hi");
+            c
+        };
+        let out = run_bounded(cmd, None, Duration::from_secs(30), "echo").unwrap();
+        assert!(out.success);
+        assert!(out.stdout.contains("hi"));
     }
 }

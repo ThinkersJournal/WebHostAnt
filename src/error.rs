@@ -1,6 +1,7 @@
 //! Errors. Each says what the person should do next, and none carries a secret value.
 
 use std::fmt;
+use std::time::Duration;
 
 use crate::Op;
 
@@ -34,6 +35,13 @@ pub enum Error {
         /// What differed, by name.
         details: Vec<String>,
     },
+    /// A call to the target did not finish in time and was stopped. What it was doing may be half done.
+    TimedOut {
+        /// The call, by name (arguments only, never a secret value).
+        what: String,
+        /// The limit it exceeded.
+        after: Duration,
+    },
     /// The target reported a failure of its own.
     Target(String),
 }
@@ -61,6 +69,11 @@ impl fmt::Display for Error {
                 f,
                 "the target does not show what was applied ({}); re-run the plan to see what is left",
                 details.join(", ")
+            ),
+            Error::TimedOut { what, after } => write!(
+                f,
+                "`{what}` did not finish within {}s and was stopped; the target may be partly changed, so plan again to see what is left before retrying",
+                after.as_secs_f32()
             ),
             Error::Target(msg) => write!(f, "the target reported: {msg}"),
         }
