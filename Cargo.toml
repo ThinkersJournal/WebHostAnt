@@ -1,8 +1,11 @@
 [package]
 name = "webhostant"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2024"
-description = "Deploy a web app to a host and prove it is there: plan, apply, read back, with a conformance suite for host adapters. Early: no real host adapter yet."
+description = "Deploy a web app to a host and prove it is there: plan, apply, read back, with a conformance suite for host adapters. Early: Cloudflare adapter exists but is unverified against a real account."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ThinkersJournal/WebHostAnt"
 readme = "README.md"
+
+[dependencies]
+serde_json = "1.0.154"

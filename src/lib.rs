@@ -7,6 +7,7 @@ mod host;
 mod manifest;
 mod target;
 
+pub mod cloudflare;
 pub mod conformance;
 pub mod fake;
 

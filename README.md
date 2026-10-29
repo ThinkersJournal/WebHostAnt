@@ -1,6 +1,6 @@
 # WebHostAnt
 
-Put a web app on a host, and prove it is there. **Early: the contract and a conformance suite exist; no real host adapter does yet** (Cloudflare is first).
+Put a web app on a host, and prove it is there. **Early: the contract and a conformance suite exist; the Cloudflare adapter exists but is unverified against a real account** (`cloudflare::CloudflareTarget`; every operation is `Unverified` until opted in).
 Not ready for developer use until it passes the fresh-eyes trial. See `ROADMAP.md` and `docs/`.
 
 ```rust
