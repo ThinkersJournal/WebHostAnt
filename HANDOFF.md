@@ -34,8 +34,8 @@ exist (all other Ants are 0.0.0 placeholders: stub behind a trait and say so). O
 PM allocates at gate). Memory rule: CARGO_BUILD_JOBS=2, one build at a time. Repos: ThinkersJournal/WebHostAnt, crate `webhostant` 0.0.0 published.
 
 ## State
-main = 1b20bcbc (0.0.12): timeouts (#10), rollback (#11), TLS read-back (#12) merged. No PR open, no worktree. PR docs/domains-design (0.0.13) proposes domain setup (docs/DOMAINS-DESIGN.md); build it after PM answers. Version: PM allocates.
-TASK 1 (done): rollback, per-step results, timeouts. Next unblocked slices: setting up domains (needs a manifest field + Step; design first), anything from the Humboldt lane's guarantees list not yet built.
+main = 2f2671b (0.0.14): timeouts, rollback, TLS read-back, domain binding (#14, design #13) merged. No PR open, no worktree.
+TASK 1 (done): rollback, per-step results, timeouts, domains. Cloudflare `tls_status`/`BindDomain` adapters are NOT buildable as assumed: wrangler has no domain bind/list command (docs/CLOUDFLARE-FACTS.md); PM asked to choose config-edit vs REST API. Next unblocked, unbind (open question in docs/DOMAINS-DESIGN.md; the PM has not been asked or answered), anything from the Humboldt guarantees list not yet built.
 TASK 2 (blocked on CireSnave D6 test account): run the suite against real wrangler and verify the UNVERIFIED output shapes in `cloudflare.rs`. Real HTTP health probe waits for HTTPAnt (probe is a closure now). Open for CireSnave: D6, D7 ConfigurAnt additions, D8 ReleaseAnt.
 Rulings: Cloudflare only first; secrets pushed (paste fallback); presence = host API then authenticated config retrieval, no unauthenticated tier; local serving waits for WebServAnt (waits for HTTPAnt). See ROADMAP.md, docs/CONSUMER-CONTRACT.md.
-Gotchas: files are CRLF-in-worktree/LF-in-blob; scripted replaces must assert count==1. Commit this HANDOFF.md edit in the next PR.
+Gotchas: files are CRLF-in-worktree/LF-in-blob; scripted replaces must assert count==1. Commit this HANDOFF.md edit in the next PR; use a worktree, never switch the primary.
