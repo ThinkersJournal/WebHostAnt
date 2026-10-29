@@ -461,6 +461,9 @@ mod tests {
         let failures = conformance::run(|scenario| match scenario {
             Scenario::Empty => target(FakeWrangler::new()),
             Scenario::HoldsOtherApp => target(FakeWrangler::other_app()),
+            Scenario::Unreachable => target(FakeWrangler::failing(
+                "fetch failed: ENOTFOUND api.cloudflare.com",
+            )),
             // Secrets left untrusted: `Unverified` is not `Yes`, so a plan that needs one must be refused.
             Scenario::SecretsUnsupported => {
                 CloudflareTarget::new(FakeWrangler::new(), "worker", |_| true)

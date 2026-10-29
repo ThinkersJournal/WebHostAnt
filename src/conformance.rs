@@ -8,13 +8,14 @@
 //!     Scenario::Empty => FakeTarget::new(),
 //!     Scenario::HoldsOtherApp => FakeTarget::new().holding_other_app(),
 //!     Scenario::SecretsUnsupported => FakeTarget::new().with_secrets_support(webhostant::Support::No),
+//!     Scenario::Unreachable => FakeTarget::new().unreachable(),
 //! });
 //! assert!(failures.is_empty(), "{failures:?}");
 //! ```
 //!
 //! Checks here: plan is inert, apply is proven by read-back, apply is idempotent, no secret leaks, a refusal changes nothing, a target
-//! that is not ours is never overwritten, an unsupported operation is an error. Not yet covered (later slices): rollback, and "unreachable
-//! is never reported as not installed" (needs a network-capable adapter).
+//! that is not ours is never overwritten, an unsupported operation is an error, a host that cannot be reached is never reported as "nothing
+//! installed". Not yet covered (later slices): rollback.
 
 use crate::{
     AppManifest, Config, Error, Host, MapSecrets, Presence, Secrets, Step, Support, Target,
@@ -31,6 +32,8 @@ pub enum Scenario {
     HoldsOtherApp,
     /// Nothing deployed; `SetSecret` is not `Yes`.
     SecretsUnsupported,
+    /// Every call to the host fails, as if the network were down or the credential refused.
+    Unreachable,
 }
 
 /// One failed check.
@@ -75,6 +78,7 @@ pub fn run<T: Target>(make: impl Fn(Scenario) -> T) -> Vec<Failure> {
     missing_secret_acts_nothing(&make, &mut out);
     not_ours_is_refused(&make, &mut out);
     unsupported_is_an_error(&make, &mut out);
+    unreachable_is_never_absent(&make, &mut out);
     out
 }
 
@@ -252,6 +256,30 @@ fn unsupported_is_an_error<T: Target>(make: &impl Fn(Scenario) -> T, out: &mut V
     }
 }
 
+fn unreachable_is_never_absent<T: Target>(make: &impl Fn(Scenario) -> T, out: &mut Vec<Failure>) {
+    const C: &str = "an unreachable host is never reported as not installed";
+    let mut host = Host::new(make(Scenario::Unreachable));
+    match host.target().locate("conformance-app") {
+        Err(_) => {}
+        other => fail(out, C, format!("locate: expected an error, got {other:?}")),
+    }
+    match host.plan(&manifest(), &config()) {
+        Err(_) => {}
+        Ok(plan) => fail(
+            out,
+            C,
+            format!(
+                "plan succeeded ({} steps) without reaching the host",
+                plan.steps().len()
+            ),
+        ),
+    }
+    let by_hand = crate::Plan::new("conformance-app", vec![Step::Create]);
+    if host.apply(&by_hand, &secrets()).is_ok() {
+        fail(out, C, "apply reported success without reaching the host");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,6 +292,7 @@ mod tests {
                 Scenario::Empty => t,
                 Scenario::HoldsOtherApp => t.holding_other_app(),
                 Scenario::SecretsUnsupported => t.with_secrets_support(Support::No),
+                Scenario::Unreachable => t.unreachable(),
             }
         }
     }
@@ -295,8 +324,21 @@ mod tests {
     }
 
     #[test]
+    fn unreachable_reported_as_absent_is_caught() {
+        assert!(
+            checks(Fault::UnreachableIsAbsent)
+                .contains(&"an unreachable host is never reported as not installed")
+        );
+    }
+
+    #[test]
     fn a_failure_never_contains_the_canary() {
-        for fault in [Fault::SilentNoop, Fault::LeaksSecret, Fault::ActsDuringPlan] {
+        for fault in [
+            Fault::SilentNoop,
+            Fault::LeaksSecret,
+            Fault::ActsDuringPlan,
+            Fault::UnreachableIsAbsent,
+        ] {
             for f in run(build(fault)) {
                 assert!(!f.detail.contains(CANARY), "{f:?}");
             }

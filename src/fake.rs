@@ -18,6 +18,8 @@ pub enum Fault {
     LeaksSecret,
     /// `locate` creates the app, so planning changes the target.
     ActsDuringPlan,
+    /// When unreachable, `locate` says `Absent` instead of failing.
+    UnreachableIsAbsent,
 }
 
 /// An in-memory target.
@@ -25,6 +27,7 @@ pub enum Fault {
 pub struct FakeTarget {
     fault: Fault,
     holds_other_app: bool,
+    unreachable: bool,
     secrets_support: Support,
     present: Cell<bool>,
     healthy: bool,
@@ -39,6 +42,7 @@ impl FakeTarget {
         Self {
             fault: Fault::None,
             holds_other_app: false,
+            unreachable: false,
             secrets_support: Support::Yes,
             present: Cell::new(false),
             healthy: false,
@@ -57,6 +61,12 @@ impl FakeTarget {
     /// Make it hold some other app under every id.
     pub fn holding_other_app(mut self) -> Self {
         self.holds_other_app = true;
+        self
+    }
+
+    /// Make every call to the host fail, as if the network were down.
+    pub fn unreachable(mut self) -> Self {
+        self.unreachable = true;
         self
     }
 
@@ -86,6 +96,13 @@ impl Target for FakeTarget {
     }
 
     fn locate(&self, _app_id: &str) -> Result<Presence, Error> {
+        if self.unreachable {
+            return if self.fault == Fault::UnreachableIsAbsent {
+                Ok(Presence::Absent)
+            } else {
+                Err(Error::Target("host unreachable".to_string()))
+            };
+        }
         if self.fault == Fault::ActsDuringPlan {
             self.present.set(true);
         }
@@ -99,6 +116,9 @@ impl Target for FakeTarget {
     }
 
     fn observe(&self, _app_id: &str) -> Result<Observed, Error> {
+        if self.unreachable {
+            return Err(Error::Target("host unreachable".to_string()));
+        }
         Ok(Observed {
             settings: self.settings.clone(),
             secret_names: self.secret_values.keys().cloned().collect::<BTreeSet<_>>(),
@@ -112,6 +132,9 @@ impl Target for FakeTarget {
         step: &Step,
         secret: Option<&SecretValue>,
     ) -> Result<(), Error> {
+        if self.unreachable {
+            return Err(Error::Target("host unreachable".to_string()));
+        }
         if self.holds_other_app {
             return Err(Error::Target("holds another app".to_string()));
         }
