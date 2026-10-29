@@ -3,7 +3,7 @@
 use std::fmt;
 use std::time::Duration;
 
-use crate::Op;
+use crate::{Op, RollbackPoint, StepOutcome};
 
 /// Everything WebHostAnt can refuse or fail at.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +34,15 @@ pub enum Error {
     ReadBackMismatch {
         /// What differed, by name.
         details: Vec<String>,
+    },
+    /// An apply began changing the target and then stopped. Some steps may have run.
+    ApplyFailed {
+        /// What happened to each step, in plan order.
+        steps: Vec<StepOutcome>,
+        /// Why it stopped.
+        cause: Box<Error>,
+        /// Present when the target can be put back: pass it to `Host::rollback`. Absent when the target cannot undo.
+        rollback_point: Option<Box<RollbackPoint>>,
     },
     /// A call to the target did not finish in time and was stopped. What it was doing may be half done.
     TimedOut {
@@ -70,6 +79,25 @@ impl fmt::Display for Error {
                 "the target does not show what was applied ({}); re-run the plan to see what is left",
                 details.join(", ")
             ),
+            Error::ApplyFailed {
+                steps,
+                cause,
+                rollback_point,
+            } => {
+                let n = |o: StepOutcome| steps.iter().filter(|s| **s == o).count();
+                write!(
+                    f,
+                    "the apply stopped ({} applied, {} failed, {} not run): {cause}. {}",
+                    n(StepOutcome::Applied),
+                    n(StepOutcome::Failed),
+                    n(StepOutcome::Skipped),
+                    if rollback_point.is_some() {
+                        "Roll back with the rollback point, or plan again to finish what is left"
+                    } else {
+                        "This target cannot undo; plan again to see what is left"
+                    }
+                )
+            }
             Error::TimedOut { what, after } => write!(
                 f,
                 "`{what}` did not finish within {}s and was stopped; the target may be partly changed, so plan again to see what is left before retrying",

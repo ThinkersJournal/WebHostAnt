@@ -5,7 +5,7 @@
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{Error, Observed, Op, Presence, SecretValue, Step, Support, Target};
+use crate::{Error, Observed, Op, Presence, SecretValue, Snapshot, Step, Support, Target};
 
 /// A deliberate defect, to prove the conformance suite can see it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +20,8 @@ pub enum Fault {
     ActsDuringPlan,
     /// When unreachable, `locate` says `Absent` instead of failing.
     UnreachableIsAbsent,
+    /// `restore` reports success and does nothing.
+    RestoreDoesNothing,
 }
 
 /// An in-memory target.
@@ -34,6 +36,10 @@ pub struct FakeTarget {
     settings: BTreeMap<String, String>,
     secret_values: BTreeMap<String, String>,
     log: Vec<String>,
+    calls: usize,
+    steps_done: usize,
+    fail_call: Option<usize>,
+    down_after: Option<usize>,
 }
 
 impl FakeTarget {
@@ -49,7 +55,23 @@ impl FakeTarget {
             settings: BTreeMap::new(),
             secret_values: BTreeMap::new(),
             log: Vec::new(),
+            calls: 0,
+            steps_done: 0,
+            fail_call: None,
+            down_after: None,
         }
+    }
+
+    /// Make the `n`th call to `apply_step` (counting from 0) fail once; later calls work.
+    pub fn failing_step_once(mut self, n: usize) -> Self {
+        self.fail_call = Some(n);
+        self
+    }
+
+    /// Make the host unreachable once `n` steps have been applied, as if the network dropped mid-deploy.
+    pub fn going_down_after(mut self, n: usize) -> Self {
+        self.down_after = Some(n);
+        self
     }
 
     /// Give it a deliberate defect.
@@ -91,7 +113,7 @@ impl Target for FakeTarget {
     fn supports(&self, op: Op) -> Support {
         match op {
             Op::SetSecret => self.secrets_support,
-            Op::Create | Op::SetSetting => Support::Yes,
+            Op::Create | Op::SetSetting | Op::Restore => Support::Yes,
         }
     }
 
@@ -132,6 +154,12 @@ impl Target for FakeTarget {
         step: &Step,
         secret: Option<&SecretValue>,
     ) -> Result<(), Error> {
+        let call = self.calls;
+        self.calls += 1;
+        if self.fail_call == Some(call) {
+            self.fail_call = None;
+            return Err(Error::Target("injected failure".to_string()));
+        }
         if self.unreachable {
             return Err(Error::Target("host unreachable".to_string()));
         }
@@ -164,6 +192,32 @@ impl Target for FakeTarget {
                 self.secret_values.insert(name.clone(), value);
             }
         }
+        self.steps_done += 1;
+        if self.down_after == Some(self.steps_done) {
+            self.unreachable = true;
+        }
+        Ok(())
+    }
+
+    fn restore(&mut self, _app_id: &str, snapshot: &Snapshot) -> Result<(), Error> {
+        if self.unreachable {
+            return Err(Error::Target("host unreachable".to_string()));
+        }
+        if self.fault == Fault::RestoreDoesNothing {
+            return Ok(());
+        }
+        if snapshot.existed {
+            self.settings = snapshot.observed.settings.clone();
+            // A secret's old value cannot be read back, so only the name set is restored.
+            let keep = &snapshot.observed.secret_names;
+            self.secret_values.retain(|name, _| keep.contains(name));
+        } else {
+            self.present.set(false);
+            self.healthy = false;
+            self.settings.clear();
+            self.secret_values.clear();
+        }
+        self.log.push("restored".to_string());
         Ok(())
     }
 
