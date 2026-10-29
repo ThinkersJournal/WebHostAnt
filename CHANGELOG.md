@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.19] - 2026-10-29
+
+- Data after a rollback, as proposed in `docs/DATA-AFTER-ROLLBACK-DESIGN.md` and answered by the PM: `Migrations` (`NoData`, `Reversible`, `ForwardOnlyOlderTolerates` = additive-only, `ForwardOnlyOlderRefuses`) on the manifest, `Release` and `Host::plan_release` beside `Host::plan` (which keeps `Unknown`), `DataAfterRollback` on the plan, printed as a first `DATA:` line and included in `Plan::digest`, so an approved plan with the warning edited away is refused. `NeedsBackupRestore` is information, not a block; rollback still never touches data. Mutations (data left out of the digest; a refusing migration reported as following) fail tests. Breaking pre-1.0: `Plan` text gains a line, new public types.
+
 ## [0.0.18] - 2026-10-29
 
 - Docs: propose stating before apply whether data can follow a rollback (`docs/DATA-AFTER-ROLLBACK-DESIGN.md`): a `Migrations` policy on the manifest, a per-release flag, `DataAfterRollback` on the plan and in its digest. No code change. Version provisional; the PM allocates.

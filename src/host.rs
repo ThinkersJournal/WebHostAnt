@@ -5,9 +5,62 @@ use std::fmt;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    AppManifest, Config, Error, Observed, Op, Presence, Secrets, Snapshot, Step, Support, Target,
-    TlsStatus,
+    AppManifest, Config, Error, Migrations, Observed, Op, Presence, Secrets, Snapshot, Step,
+    Support, Target, TlsStatus,
 };
+
+/// Whether a release changes the consumer's data schema. Only the consumer knows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Release {
+    /// The consumer did not say. A plan then cannot say whether data can follow a rollback.
+    Unknown,
+    /// This release changes the schema.
+    MigratesSchema,
+    /// This release leaves the schema as it was.
+    NoSchemaChange,
+}
+
+/// What a plan says about data if the code is later rolled back. Stated before apply; rollback itself never touches data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataAfterRollback {
+    /// The app declared no data to protect.
+    NoData,
+    /// Older code runs on the data as it will be.
+    Follows,
+    /// Older code will refuse the new data: only a backup restore will do.
+    NeedsBackupRestore,
+    /// The consumer did not say enough to tell.
+    Unknown,
+}
+
+impl DataAfterRollback {
+    fn derive(policy: Option<Migrations>, release: Release) -> Self {
+        match (policy, release) {
+            (None, _) => Self::Unknown,
+            (Some(Migrations::NoData), _) => Self::NoData,
+            (Some(_), Release::Unknown) => Self::Unknown,
+            (Some(_), Release::NoSchemaChange) => Self::Follows,
+            (Some(Migrations::ForwardOnlyOlderRefuses), Release::MigratesSchema) => {
+                Self::NeedsBackupRestore
+            }
+            (Some(_), Release::MigratesSchema) => Self::Follows,
+        }
+    }
+
+    /// The sentence a plan prints.
+    pub fn sentence(self) -> &'static str {
+        match self {
+            Self::NoData => "this app declares no data, so a rollback has none to lose",
+            Self::Follows => "after a rollback, older code will run on the data as it will be",
+            Self::NeedsBackupRestore => {
+                "after a rollback, older code will REFUSE the new data; only a backup restore will do"
+            }
+            Self::Unknown => {
+                "whether data can follow a rollback is NOT KNOWN; the consumer did not say"
+            }
+        }
+    }
+}
 
 /// An inert list of changes. Holds secret names, never values.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,6 +68,7 @@ pub struct Plan {
     app_id: String,
     steps: Vec<Step>,
     undoable: bool,
+    data: DataAfterRollback,
 }
 
 impl Plan {
@@ -24,12 +78,18 @@ impl Plan {
             app_id: app_id.into(),
             steps,
             undoable: false,
+            data: DataAfterRollback::Unknown,
         }
     }
 
     /// Whether the target this plan was made for can put the app back. Always `false` for a hand-built plan: say "cannot undo" unless known.
     pub fn undoable(&self) -> bool {
         self.undoable
+    }
+
+    /// What this plan says about data if the code is rolled back.
+    pub fn data_after_rollback(&self) -> DataAfterRollback {
+        self.data
     }
 
     /// The app this plan is for.
@@ -54,6 +114,7 @@ impl Plan {
         field(b'v', "webhostant-plan-v1");
         field(b'a', &self.app_id);
         field(b'u', if self.undoable { "1" } else { "0" });
+        field(b'D', self.data.sentence());
         for step in &self.steps {
             match step {
                 Step::Create => field(b'c', ""),
@@ -79,6 +140,7 @@ impl fmt::Display for Plan {
         if self.steps.is_empty() {
             return writeln!(f, "{}: nothing to change", self.app_id);
         }
+        writeln!(f, "DATA: {}", self.data.sentence())?;
         if !self.undoable {
             writeln!(f, "note: this target cannot undo these changes")?;
         }
@@ -209,6 +271,16 @@ impl<T: Target> Host<T> {
 
     /// Work out what would change. Inert: takes `&self` and only reads.
     pub fn plan(&self, manifest: &AppManifest, config: &Config) -> Result<Plan, Error> {
+        self.plan_release(manifest, config, Release::Unknown)
+    }
+
+    /// Like [`Host::plan`], and states whether data can follow a rollback, from the manifest's [`Migrations`] and what the consumer says about this release.
+    pub fn plan_release(
+        &self,
+        manifest: &AppManifest,
+        config: &Config,
+        release: Release,
+    ) -> Result<Plan, Error> {
         if let Some(bad) = manifest
             .domains
             .iter()
@@ -258,6 +330,7 @@ impl<T: Target> Host<T> {
             app_id: manifest.id.clone(),
             steps,
             undoable: self.can_roll_back(),
+            data: DataAfterRollback::derive(manifest.migrations, release),
         })
     }
 
@@ -530,5 +603,93 @@ mod tests {
             .apply_approved(&plan, &plan.digest(), &secrets)
             .unwrap();
         assert!(applied.read_back.healthy);
+    }
+
+    fn data_plan(policy: Option<Migrations>, release: Release) -> Plan {
+        let mut a = AppManifest::new("digest-app").setting("BASE_URL");
+        if let Some(p) = policy {
+            a = a.migrations(p);
+        }
+        Host::new(FakeTarget::new())
+            .plan_release(&a, &config("https://a.example.org"), release)
+            .unwrap()
+    }
+
+    #[test]
+    fn each_policy_and_release_gives_its_one_statement() {
+        use Migrations::*;
+        use Release::*;
+        let cases = [
+            (None, MigratesSchema, DataAfterRollback::Unknown),
+            (None, NoSchemaChange, DataAfterRollback::Unknown),
+            (Some(NoData), MigratesSchema, DataAfterRollback::NoData),
+            (Some(Reversible), Unknown, DataAfterRollback::Unknown),
+            (Some(Reversible), MigratesSchema, DataAfterRollback::Follows),
+            (Some(Reversible), NoSchemaChange, DataAfterRollback::Follows),
+            (
+                Some(ForwardOnlyOlderTolerates),
+                MigratesSchema,
+                DataAfterRollback::Follows,
+            ),
+            (
+                Some(ForwardOnlyOlderRefuses),
+                NoSchemaChange,
+                DataAfterRollback::Follows,
+            ),
+            (
+                Some(ForwardOnlyOlderRefuses),
+                Unknown,
+                DataAfterRollback::Unknown,
+            ),
+            (
+                Some(ForwardOnlyOlderRefuses),
+                MigratesSchema,
+                DataAfterRollback::NeedsBackupRestore,
+            ),
+        ];
+        for (policy, release, want) in cases {
+            assert_eq!(
+                data_plan(policy, release).data_after_rollback(),
+                want,
+                "{policy:?} + {release:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn plain_plan_says_not_known_and_prints_a_data_line_first() {
+        let host = Host::new(FakeTarget::new());
+        let plan = host.plan(&app(), &config("https://a.example.org")).unwrap();
+        assert_eq!(plan.data_after_rollback(), DataAfterRollback::Unknown);
+        assert!(plan.to_string().starts_with("DATA: "));
+    }
+
+    #[test]
+    fn a_refusing_migration_never_prints_follows() {
+        let plan = data_plan(
+            Some(Migrations::ForwardOnlyOlderRefuses),
+            Release::MigratesSchema,
+        );
+        let text = plan.to_string();
+        assert!(text.contains("REFUSE"), "{text}");
+        assert!(!text.contains("will run on the data"), "{text}");
+    }
+
+    #[test]
+    fn an_approved_plan_with_the_warning_edited_away_is_refused() {
+        let mut host = Host::new(FakeTarget::new());
+        let plan = data_plan(
+            Some(Migrations::ForwardOnlyOlderRefuses),
+            Release::MigratesSchema,
+        );
+        let approved = plan.digest();
+        let mut edited = plan.clone();
+        edited.data = DataAfterRollback::Follows;
+        assert_ne!(edited.digest(), approved);
+        let secrets = MapSecrets::new().with("API_TOKEN", "t");
+        assert_eq!(
+            host.apply_approved(&edited, &approved, &secrets),
+            Err(Error::PlanChanged)
+        );
     }
 }

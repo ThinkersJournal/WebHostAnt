@@ -12,6 +12,8 @@ pub mod conformance;
 pub mod fake;
 
 pub use error::Error;
-pub use host::{Applied, Host, Plan, ReadBack, Rollback, RollbackPoint, StepOutcome};
-pub use manifest::{AppManifest, Config, MapSecrets, SecretValue, Secrets};
+pub use host::{
+    Applied, DataAfterRollback, Host, Plan, ReadBack, Release, Rollback, RollbackPoint, StepOutcome,
+};
+pub use manifest::{AppManifest, Config, MapSecrets, Migrations, SecretValue, Secrets};
 pub use target::{Observed, Op, Presence, Renewal, Snapshot, Step, Support, Target, TlsStatus};
