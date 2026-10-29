@@ -18,8 +18,7 @@
 //! Checks here: plan is inert, apply is proven by read-back, apply is idempotent, no secret leaks, a refusal changes nothing, a target
 //! that is not ours is never overwritten, an unsupported operation is an error, a host that cannot be reached is never reported as "nothing
 //! installed", a failed apply says which steps ran and a re-run finishes it, a target that can restore puts the app back and proves it by
-//! read-back (and says `Unknown`, never `Restored`, when it cannot tell), and a target that cannot restore says so before apply, and domain/certificate status is read from the target, never made up. Not yet
-//! covered: setting up domains.
+//! read-back (and says `Unknown`, never `Restored`, when it cannot tell), and a target that cannot restore says so before apply, and domain/certificate status is read from the target, never made up, and a declared domain is bound, proven by read-back and not bound twice.
 
 use crate::{
     AppManifest, Config, Error, Host, MapSecrets, Presence, Rollback, Secrets, Step, StepOutcome,
@@ -94,6 +93,7 @@ pub fn run<T: Target>(make: impl Fn(Scenario) -> T) -> Vec<Failure> {
     failed_apply_can_be_rolled_back(&make, &mut out);
     rollback_never_claims_more_than_it_knows(&make, &mut out);
     tls_status_is_read_never_made_up(&make, &mut out);
+    domains_are_bound_and_read_back(&make, &mut out);
     out
 }
 
@@ -508,6 +508,85 @@ fn tls_status_is_read_never_made_up<T: Target>(
     }
 }
 
+fn domains_are_bound_and_read_back<T: Target>(
+    make: &impl Fn(Scenario) -> T,
+    out: &mut Vec<Failure>,
+) {
+    const C: &str = "a declared domain is bound, proven by read-back, and not bound twice";
+    let app = manifest().domain("app.example.org");
+    let mut host = Host::new(make(Scenario::Empty));
+    if host.target().supports(crate::Op::BindDomain) != Support::Yes {
+        match host.plan(&app, &config()) {
+            Err(Error::Unsupported { .. }) => {}
+            other => fail(
+                out,
+                C,
+                format!(
+                    "unsupported: expected Unsupported, got {:?}",
+                    other.map(|p| p.steps().len())
+                ),
+            ),
+        }
+        return;
+    }
+    match host.plan(&manifest().domain("https://app.example.org/x"), &config()) {
+        Err(Error::InvalidDomain { .. }) => {}
+        other => fail(
+            out,
+            C,
+            format!(
+                "an invalid name was not refused: {:?}",
+                other.map(|p| p.steps().len())
+            ),
+        ),
+    }
+    let plan = match host.plan(&app, &config()) {
+        Ok(p) => p,
+        Err(e) => return fail(out, C, format!("planning failed: {e}")),
+    };
+    if !plan
+        .steps()
+        .iter()
+        .any(|s| matches!(s, Step::BindDomain { .. }))
+    {
+        return fail(out, C, "the plan has no bind step for a declared domain");
+    }
+    match host.apply(&plan, &secrets()) {
+        Ok(a) if a.read_back.domains == ["app.example.org"] => {}
+        Ok(a) => fail(
+            out,
+            C,
+            format!(
+                "read-back did not name the domain: {:?}",
+                a.read_back.domains
+            ),
+        ),
+        Err(e) => return fail(out, C, format!("apply failed: {e}")),
+    }
+    match host.target().observe("conformance-app") {
+        Ok(o) if o.domains.contains("app.example.org") => {}
+        other => fail(
+            out,
+            C,
+            format!(
+                "the target does not show the domain bound: {:?}",
+                other.map(|o| o.domains)
+            ),
+        ),
+    }
+    match host.plan(&app, &config()) {
+        Ok(p) if p.is_empty() => {}
+        other => fail(
+            out,
+            C,
+            format!(
+                "a second plan is not empty: {:?}",
+                other.map(|p| p.steps().len())
+            ),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -566,6 +645,14 @@ mod tests {
         assert!(
             checks(Fault::TlsEmptyInsteadOfError)
                 .contains(&"domain and certificate status is read from the target, never made up")
+        );
+    }
+
+    #[test]
+    fn a_bind_that_binds_nothing_is_caught() {
+        assert!(
+            checks(Fault::DomainNotBound)
+                .contains(&"a declared domain is bound, proven by read-back, and not bound twice")
         );
     }
 

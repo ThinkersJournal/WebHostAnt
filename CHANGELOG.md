@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.0.14] - 2026-10-29
+
+- Setting up domains, as proposed in `docs/DOMAINS-DESIGN.md`: `AppManifest::domain(name)`, `Step::BindDomain`, `Op::BindDomain`, `Observed.domains`, `ReadBack.domains`, `Error::InvalidDomain`. `plan` refuses a name that is not a plain host name before touching the target, and binds each declared name the target does not already show; the read-back fails unless every bound name is shown. Names bound but not declared are left alone. No DNS and no certificate work; rollback does not unbind. The Cloudflare adapter declares `BindDomain` as `No` (not built).
+- Conformance: one new check; `fake::Fault::DomainNotBound` proves it can fail. Breaking pre-1.0: `Op`, `Step` and `Error` gain variants, `Observed` and `ReadBack` gain fields.
+
 ## [0.0.13] - 2026-10-29
 
 - Docs: propose setting up domains (`docs/DOMAINS-DESIGN.md`): `AppManifest::domain`, `Step::BindDomain`, bound names in `Observed`, read-back and conformance. No code change.

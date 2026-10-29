@@ -336,7 +336,8 @@ impl<R: Runner> Target for CloudflareTarget<R> {
 
     fn supports(&self, op: Op) -> Support {
         // No previous-version handle is read yet, so this adapter cannot put an app back (docs/ROLLBACK-DESIGN.md).
-        if op == Op::Restore {
+        // Domain binding is not built for this adapter yet (docs/DOMAINS-DESIGN.md); never claim it.
+        if op == Op::Restore || op == Op::BindDomain {
             Support::No
         } else if self.trusted.contains(&op) {
             Support::Yes
@@ -361,6 +362,7 @@ impl<R: Runner> Target for CloudflareTarget<R> {
         Ok(Observed {
             settings,
             secret_names: self.secret_names(app_id)?,
+            domains: Default::default(),
             healthy: (self.probe)(app_id),
         })
     }
@@ -372,6 +374,12 @@ impl<R: Runner> Target for CloudflareTarget<R> {
         secret: Option<&SecretValue>,
     ) -> Result<(), Error> {
         let (call_text, out) = match step {
+            Step::BindDomain { .. } => {
+                return Err(Error::Unsupported {
+                    target: "cloudflare".to_string(),
+                    op: Op::BindDomain,
+                });
+            }
             Step::Create => ("deploy".to_string(), self.deploy(app_id, &[])?),
             Step::SetSetting { name, value } => (
                 format!("deploy (set {name})"),

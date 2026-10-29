@@ -17,6 +17,8 @@ pub enum Op {
     Restore,
     /// Read the app's domain and certificate status.
     ReadTls,
+    /// Bind a host name to the app.
+    BindDomain,
 }
 
 /// What a target declares for an operation. Only `Yes` satisfies a plan; `Unverified` is the default for anything not proven.
@@ -47,6 +49,11 @@ pub enum Step {
         /// Secret name.
         name: String,
     },
+    /// Bind a host name to the app. Nothing else: no DNS records, no certificate material.
+    BindDomain {
+        /// The host name.
+        name: String,
+    },
 }
 
 impl Step {
@@ -56,6 +63,7 @@ impl Step {
             Step::Create => Op::Create,
             Step::SetSetting { .. } => Op::SetSetting,
             Step::SetSecret { .. } => Op::SetSecret,
+            Step::BindDomain { .. } => Op::BindDomain,
         }
     }
 }
@@ -78,6 +86,8 @@ pub struct Observed {
     pub settings: BTreeMap<String, String>,
     /// Names of secrets that exist (never values).
     pub secret_names: BTreeSet<String>,
+    /// Host names bound to the app.
+    pub domains: BTreeSet<String>,
     /// Whether the app answers its health path.
     pub healthy: bool,
 }

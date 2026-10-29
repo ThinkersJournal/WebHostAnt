@@ -24,6 +24,8 @@ pub enum Fault {
     UnreachableIsAbsent,
     /// `restore` reports success and does nothing.
     RestoreDoesNothing,
+    /// A bind step reports success and binds nothing.
+    DomainNotBound,
     /// `tls_status` answers with an empty status when the host cannot be reached.
     TlsEmptyInsteadOfError,
 }
@@ -39,6 +41,7 @@ pub struct FakeTarget {
     healthy: bool,
     settings: BTreeMap<String, String>,
     secret_values: BTreeMap<String, String>,
+    domains: BTreeSet<String>,
     log: Vec<String>,
     calls: usize,
     steps_done: usize,
@@ -58,6 +61,7 @@ impl FakeTarget {
             healthy: false,
             settings: BTreeMap::new(),
             secret_values: BTreeMap::new(),
+            domains: BTreeSet::new(),
             log: Vec::new(),
             calls: 0,
             steps_done: 0,
@@ -117,7 +121,9 @@ impl Target for FakeTarget {
     fn supports(&self, op: Op) -> Support {
         match op {
             Op::SetSecret => self.secrets_support,
-            Op::Create | Op::SetSetting | Op::Restore | Op::ReadTls => Support::Yes,
+            Op::Create | Op::SetSetting | Op::Restore | Op::ReadTls | Op::BindDomain => {
+                Support::Yes
+            }
         }
     }
 
@@ -148,6 +154,7 @@ impl Target for FakeTarget {
         Ok(Observed {
             settings: self.settings.clone(),
             secret_names: self.secret_values.keys().cloned().collect::<BTreeSet<_>>(),
+            domains: self.domains.clone(),
             healthy: self.present.get() && self.healthy,
         })
     }
@@ -182,6 +189,12 @@ impl Target for FakeTarget {
             Step::SetSetting { name, value } => {
                 self.settings.insert(name.clone(), value.clone());
                 self.log.push(format!("set {name}"));
+            }
+            Step::BindDomain { name } => {
+                if self.fault != Fault::DomainNotBound {
+                    self.domains.insert(name.clone());
+                }
+                self.log.push(format!("bound {name}"));
             }
             Step::SetSecret { name } => {
                 let value = secret
