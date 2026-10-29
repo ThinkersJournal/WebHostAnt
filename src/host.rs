@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use sha2::{Digest, Sha256};
+
 use crate::{
     AppManifest, Config, Error, Observed, Op, Presence, Secrets, Snapshot, Step, Support, Target,
     TlsStatus,
@@ -38,6 +40,32 @@ impl Plan {
     /// The changes, in order.
     pub fn steps(&self) -> &[Step] {
         &self.steps
+    }
+
+    /// A fingerprint of this plan: the app, the undo note and every step in order, with setting values and secret *names* (never secret values,
+    /// which a plan does not hold). Show it with the plan; pass it to [`Host::apply_approved`] to apply only what was approved.
+    pub fn digest(&self) -> String {
+        let mut h = Sha256::new();
+        let mut field = |tag: u8, text: &str| {
+            h.update([tag]);
+            h.update((text.len() as u64).to_be_bytes());
+            h.update(text.as_bytes());
+        };
+        field(b'v', "webhostant-plan-v1");
+        field(b'a', &self.app_id);
+        field(b'u', if self.undoable { "1" } else { "0" });
+        for step in &self.steps {
+            match step {
+                Step::Create => field(b'c', ""),
+                Step::SetSetting { name, value } => {
+                    field(b's', name);
+                    field(b'=', value);
+                }
+                Step::SetSecret { name } => field(b'k', name),
+                Step::BindDomain { name } => field(b'd', name),
+            }
+        }
+        h.finalize().iter().map(|b| format!("{b:02x}")).collect()
     }
 
     /// True when the target already matches.
@@ -256,6 +284,19 @@ impl<T: Target> Host<T> {
         self.target.supports(Op::Restore) == Support::Yes
     }
 
+    /// Apply `plan` only if its [`Plan::digest`] is the one that was approved; otherwise `Error::PlanChanged` and nothing is touched.
+    pub fn apply_approved(
+        &mut self,
+        plan: &Plan,
+        approved_digest: &str,
+        secrets: &dyn Secrets,
+    ) -> Result<Applied, Error> {
+        if plan.digest() != approved_digest {
+            return Err(Error::PlanChanged);
+        }
+        self.apply(plan, secrets)
+    }
+
     /// Make the plan so, then read the target's own state back. `Ok` means the read-back matched, not that a command returned.
     ///
     /// Everything that can be checked without acting (ownership, support, secrets present) is checked first, so a refusal changes nothing.
@@ -432,5 +473,62 @@ impl<T: Target> Host<T> {
         } else {
             Err(Error::ReadBackMismatch { details: bad })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fake::FakeTarget;
+    use crate::{Config, MapSecrets};
+
+    fn app() -> AppManifest {
+        AppManifest::new("digest-app")
+            .setting("BASE_URL")
+            .secret("API_TOKEN")
+    }
+
+    fn config(url: &str) -> Config {
+        Config::from([("BASE_URL".to_string(), url.to_string())])
+    }
+
+    #[test]
+    fn the_same_plan_has_the_same_digest_and_a_changed_plan_does_not() {
+        let host = Host::new(FakeTarget::new());
+        let a = host.plan(&app(), &config("https://a.example.org")).unwrap();
+        let again = host.plan(&app(), &config("https://a.example.org")).unwrap();
+        let b = host.plan(&app(), &config("https://b.example.org")).unwrap();
+        assert_eq!(a.digest(), again.digest());
+        assert_ne!(a.digest(), b.digest());
+        assert_eq!(a.digest().len(), 64);
+    }
+
+    #[test]
+    fn a_tampered_plan_is_refused_and_the_target_is_untouched() {
+        let mut host = Host::new(FakeTarget::new());
+        let plan = host.plan(&app(), &config("https://a.example.org")).unwrap();
+        let approved = plan.digest();
+        let mut tampered = plan.clone();
+        tampered.steps.push(Step::SetSetting {
+            name: "EVIL".into(),
+            value: "1".into(),
+        });
+        let secrets = MapSecrets::new().with("API_TOKEN", "t");
+        assert_eq!(
+            host.apply_approved(&tampered, &approved, &secrets),
+            Err(Error::PlanChanged)
+        );
+        assert_eq!(host.target.locate("digest-app").unwrap(), Presence::Absent);
+    }
+
+    #[test]
+    fn the_approved_plan_applies() {
+        let mut host = Host::new(FakeTarget::new());
+        let plan = host.plan(&app(), &config("https://a.example.org")).unwrap();
+        let secrets = MapSecrets::new().with("API_TOKEN", "t");
+        let applied = host
+            .apply_approved(&plan, &plan.digest(), &secrets)
+            .unwrap();
+        assert!(applied.read_back.healthy);
     }
 }

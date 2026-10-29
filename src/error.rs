@@ -56,6 +56,8 @@ pub enum Error {
         /// The name as declared.
         name: String,
     },
+    /// The plan to apply is not the plan that was approved. Nothing was changed.
+    PlanChanged,
     /// The target reported a failure of its own.
     Target(String),
 }
@@ -111,6 +113,10 @@ impl fmt::Display for Error {
             Error::InvalidDomain { name } => write!(
                 f,
                 "`{name}` is not a host name WebHostAnt can bind; use letters, digits, hyphens and dots only, like app.example.org (no scheme, port, path, wildcard or address)"
+            ),
+            Error::PlanChanged => write!(
+                f,
+                "this plan is not the one that was approved, so nothing was applied; make a new plan and approve it again"
             ),
             Error::Target(msg) => write!(f, "the target reported: {msg}"),
         }
