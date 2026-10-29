@@ -18,7 +18,7 @@ assert_eq!(plan.data_after_rollback(), DataAfterRollback::NeedsBackupRestore);
 WebHostAnt never sees the consumer's schema or runs its migrations (they stay the consumer's, contract section 5). So it cannot *discover* whether a
 release migrates; the consumer must say so at plan time. It then combines two declared facts and states the result. It does not check them.
 
-1. `Migrations` on the manifest (row 6): `NoData` (nothing to protect), `Reversible`, `ForwardOnlyOlderTolerates`, `ForwardOnlyOlderRefuses`.
+1. `Migrations` on the manifest (row 6): `NoData` (nothing to protect), `Reversible`, `ForwardOnlyOlderTolerates` (additive-only: the migration only adds, so older code still runs on the new data), `ForwardOnlyOlderRefuses`.
 2. `Release` at plan time: `MigratesSchema` or `NoSchemaChange`. Default for the existing `Host::plan` is **`Unknown`**, which yields `Unknown` below: never
    a guess in the comforting direction.
 
@@ -26,7 +26,8 @@ release migrates; the consumer must say so at plan time. It then combines two de
 
 `DataAfterRollback`: `NoData`, `Follows` (no schema change, or older code tolerates or the migration reverses), `NeedsBackupRestore` (forward-only and older
 code refuses), `Unknown` (the consumer did not say). `Plan` Display prints one plain sentence for each, first line, before the steps. The statement is part of
-`Plan::digest`, so an approved plan cannot have its data warning edited away. `Host::rollback` is unchanged: it still touches code, settings and secret
+`Plan::digest`, so an approved plan cannot have its data warning edited away (a test edits the sentence away and the plan is refused). The line is printed
+as its own first line, starting `DATA:`, so it cannot be mistaken for a step. `Host::rollback` is unchanged: it still touches code, settings and secret
 names only, and never data. `NeedsBackupRestore` is information, not a block; blocking would stop the person recovering code when they accept the risk.
 
 ## Conformance
@@ -35,8 +36,8 @@ The statement is derived from the manifest and the release flag alone, not from 
 each policy and release pair gives its one statement; `Unknown` is the default; changing either input changes the digest; a forward-only-refuses plan that
 migrates never prints "follows".
 
-## Questions for the PM
+## Decided by the PM (2026-10-29)
 
-- Are these four policy names right, or does Humboldt's design need a fifth (for example, "older code tolerates only additive changes")?
-- Should `Host::plan_release` replace `Host::plan` (breaking), or sit beside it? I propose beside it.
-- Version: new capability, one PR after this docs PR; the PM allocates.
+- The four policy names stand; "older code tolerates only additive changes" is `ForwardOnlyOlderTolerates`, so no fifth.
+- `Host::plan_release` sits beside `Host::plan`; `Host::plan` keeps `Unknown` as its default.
+- The code PR is 0.0.19.
