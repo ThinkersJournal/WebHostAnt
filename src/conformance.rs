@@ -9,16 +9,21 @@
 //!     Scenario::HoldsOtherApp => FakeTarget::new().holding_other_app(),
 //!     Scenario::SecretsUnsupported => FakeTarget::new().with_secrets_support(webhostant::Support::No),
 //!     Scenario::Unreachable => FakeTarget::new().unreachable(),
+//!     Scenario::FailsLastStepOnce => FakeTarget::new().failing_step_once(2),
+//!     Scenario::DropsAfterApply => FakeTarget::new().going_down_after(3),
 //! });
 //! assert!(failures.is_empty(), "{failures:?}");
 //! ```
 //!
 //! Checks here: plan is inert, apply is proven by read-back, apply is idempotent, no secret leaks, a refusal changes nothing, a target
 //! that is not ours is never overwritten, an unsupported operation is an error, a host that cannot be reached is never reported as "nothing
-//! installed". Not yet covered (later slices): rollback.
+//! installed", a failed apply says which steps ran and a re-run finishes it, a target that can restore puts the app back and proves it by
+//! read-back (and says `Unknown`, never `Restored`, when it cannot tell), and a target that cannot restore says so before apply. Not yet
+//! covered: TLS read-back.
 
 use crate::{
-    AppManifest, Config, Error, Host, MapSecrets, Presence, Secrets, Step, Support, Target,
+    AppManifest, Config, Error, Host, MapSecrets, Presence, Rollback, Secrets, Step, StepOutcome,
+    Support, Target,
 };
 
 const CANARY: &str = "CANARY-7f3a-not-a-real-secret";
@@ -34,6 +39,10 @@ pub enum Scenario {
     SecretsUnsupported,
     /// Every call to the host fails, as if the network were down or the credential refused.
     Unreachable,
+    /// Nothing deployed. Of the three steps of the suite's plan (create, one setting, one secret), the third fails once; a second try works.
+    FailsLastStepOnce,
+    /// Nothing deployed. Every call to the host fails once all three steps of the suite's plan have been applied.
+    DropsAfterApply,
 }
 
 /// One failed check.
@@ -79,6 +88,11 @@ pub fn run<T: Target>(make: impl Fn(Scenario) -> T) -> Vec<Failure> {
     not_ours_is_refused(&make, &mut out);
     unsupported_is_an_error(&make, &mut out);
     unreachable_is_never_absent(&make, &mut out);
+    undo_is_stated_up_front(&make, &mut out);
+    failed_apply_is_visible_and_resumable(&make, &mut out);
+    rollback_restores_the_snapshot(&make, &mut out);
+    failed_apply_can_be_rolled_back(&make, &mut out);
+    rollback_never_claims_more_than_it_knows(&make, &mut out);
     out
 }
 
@@ -280,6 +294,165 @@ fn unreachable_is_never_absent<T: Target>(make: &impl Fn(Scenario) -> T, out: &m
     }
 }
 
+fn undo_is_stated_up_front<T: Target>(make: &impl Fn(Scenario) -> T, out: &mut Vec<Failure>) {
+    const C: &str = "whether an apply can be undone is stated before it runs";
+    let mut host = Host::new(make(Scenario::Empty));
+    let can = host.target().supports(crate::Op::Restore) == Support::Yes;
+    if host.can_roll_back() != can {
+        fail(out, C, "Host::can_roll_back disagrees with the target");
+    }
+    let plan = match host.plan(&manifest(), &config()) {
+        Ok(p) => p,
+        Err(e) => return fail(out, C, format!("planning failed: {e}")),
+    };
+    if plan.undoable() != can {
+        fail(out, C, "the plan's undoable flag disagrees with the target");
+    }
+    if !can && !plan.to_string().contains("cannot undo") {
+        fail(out, C, "the plan does not say that it cannot be undone");
+    }
+    match host.apply(&plan, &secrets()) {
+        Ok(applied) if applied.rollback_point.is_some() != can => fail(
+            out,
+            C,
+            "the rollback point is present only when the target can restore",
+        ),
+        Ok(_) => {}
+        Err(e) => fail(out, C, format!("apply failed: {e}")),
+    }
+}
+
+fn failed_apply_is_visible_and_resumable<T: Target>(
+    make: &impl Fn(Scenario) -> T,
+    out: &mut Vec<Failure>,
+) {
+    const C: &str = "a failed apply says which steps ran, and a re-run finishes it";
+    let mut host = Host::new(make(Scenario::FailsLastStepOnce));
+    let plan = match host.plan(&manifest(), &config()) {
+        Ok(p) => p,
+        Err(e) => return fail(out, C, format!("planning failed: {e}")),
+    };
+    let total = plan.steps().len();
+    match host.apply(&plan, &secrets()) {
+        Err(Error::ApplyFailed { steps, .. }) => {
+            let mut expected = vec![StepOutcome::Applied; total];
+            expected[total - 1] = StepOutcome::Failed;
+            if steps != expected {
+                fail(out, C, format!("expected {expected:?}, got {steps:?}"));
+            }
+        }
+        other => return fail(out, C, format!("expected ApplyFailed, got {other:?}")),
+    }
+    match host.plan(&manifest(), &config()) {
+        Ok(again) if again.steps().len() >= total => fail(
+            out,
+            C,
+            "a re-plan after a partial apply repeats finished steps",
+        ),
+        Ok(again) => {
+            if let Err(e) = host.apply(&again, &secrets()) {
+                fail(out, C, format!("the re-run did not finish: {e}"));
+            }
+        }
+        Err(e) => fail(out, C, format!("re-planning failed: {e}")),
+    }
+}
+
+fn gone<T: Target>(host: &Host<T>) -> bool {
+    host.target().locate("conformance-app") == Ok(Presence::Absent)
+}
+
+fn rollback_restores_the_snapshot<T: Target>(
+    make: &impl Fn(Scenario) -> T,
+    out: &mut Vec<Failure>,
+) {
+    const C: &str = "rollback puts the app back, proven by read-back";
+    let mut host = Host::new(make(Scenario::Empty));
+    if !host.can_roll_back() {
+        return;
+    }
+    let plan = match host.plan(&manifest(), &config()) {
+        Ok(p) => p,
+        Err(e) => return fail(out, C, format!("planning failed: {e}")),
+    };
+    let Some(point) = host
+        .apply(&plan, &secrets())
+        .ok()
+        .and_then(|a| a.rollback_point)
+    else {
+        return fail(out, C, "apply gave no rollback point");
+    };
+    match host.rollback(&point) {
+        Rollback::Restored => {
+            // Independent of the host's own verification.
+            if !gone(&host) {
+                fail(out, C, "reported Restored but the app is still there");
+            }
+        }
+        other => fail(out, C, format!("expected Restored, got {other:?}")),
+    }
+}
+
+fn failed_apply_can_be_rolled_back<T: Target>(
+    make: &impl Fn(Scenario) -> T,
+    out: &mut Vec<Failure>,
+) {
+    const C: &str = "a half-finished apply can be rolled back";
+    let mut host = Host::new(make(Scenario::FailsLastStepOnce));
+    if !host.can_roll_back() {
+        return;
+    }
+    let plan = match host.plan(&manifest(), &config()) {
+        Ok(p) => p,
+        Err(e) => return fail(out, C, format!("planning failed: {e}")),
+    };
+    let Err(Error::ApplyFailed {
+        rollback_point: Some(point),
+        ..
+    }) = host.apply(&plan, &secrets())
+    else {
+        return fail(out, C, "the failed apply gave no rollback point");
+    };
+    match host.rollback(&point) {
+        Rollback::Restored if gone(&host) => {}
+        other => fail(
+            out,
+            C,
+            format!("expected Restored with the app gone, got {other:?}"),
+        ),
+    }
+}
+
+fn rollback_never_claims_more_than_it_knows<T: Target>(
+    make: &impl Fn(Scenario) -> T,
+    out: &mut Vec<Failure>,
+) {
+    const C: &str = "a rollback on an unreachable host is Unknown, never Restored";
+    let mut host = Host::new(make(Scenario::DropsAfterApply));
+    if !host.can_roll_back() {
+        return;
+    }
+    let plan = match host.plan(&manifest(), &config()) {
+        Ok(p) => p,
+        Err(e) => return fail(out, C, format!("planning failed: {e}")),
+    };
+    let Err(Error::ApplyFailed {
+        rollback_point: Some(point),
+        ..
+    }) = host.apply(&plan, &secrets())
+    else {
+        return fail(
+            out,
+            C,
+            "an apply that lost the host did not fail with a rollback point",
+        );
+    };
+    match host.rollback(&point) {
+        Rollback::Unknown { .. } => {}
+        other => fail(out, C, format!("expected Unknown, got {other:?}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,6 +466,8 @@ mod tests {
                 Scenario::HoldsOtherApp => t.holding_other_app(),
                 Scenario::SecretsUnsupported => t.with_secrets_support(Support::No),
                 Scenario::Unreachable => t.unreachable(),
+                Scenario::FailsLastStepOnce => t.failing_step_once(2),
+                Scenario::DropsAfterApply => t.going_down_after(3),
             }
         }
     }
@@ -332,8 +507,47 @@ mod tests {
     }
 
     #[test]
+    fn a_restore_that_does_nothing_is_caught() {
+        assert!(
+            checks(Fault::RestoreDoesNothing)
+                .contains(&"rollback puts the app back, proven by read-back")
+        );
+    }
+
+    #[test]
+    fn a_restore_that_does_nothing_reads_back_as_unknown() {
+        let mut host = Host::new(FakeTarget::new().with_fault(Fault::RestoreDoesNothing));
+        let plan = host.plan(&manifest(), &config()).unwrap();
+        let point = host
+            .apply(&plan, &secrets())
+            .unwrap()
+            .rollback_point
+            .unwrap();
+        match host.rollback(&point) {
+            Rollback::Unknown { details, .. } => assert!(!details.is_empty()),
+            other => panic!("expected Unknown, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nothing_applied_means_nothing_to_undo() {
+        let mut host = Host::new(FakeTarget::new());
+        let plan = crate::Plan::new("conformance-app", vec![]);
+        let point = host
+            .apply(&plan, &secrets())
+            .err()
+            .and_then(|e| match e {
+                Error::ApplyFailed { rollback_point, .. } => rollback_point,
+                _ => None,
+            })
+            .expect("an empty plan on an empty target fails read-back with a point");
+        assert_eq!(host.rollback(&point), Rollback::Unchanged);
+    }
+
+    #[test]
     fn a_failure_never_contains_the_canary() {
         for fault in [
+            Fault::RestoreDoesNothing,
             Fault::SilentNoop,
             Fault::LeaksSecret,
             Fault::ActsDuringPlan,

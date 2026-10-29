@@ -335,7 +335,10 @@ impl<R: Runner> Target for CloudflareTarget<R> {
     }
 
     fn supports(&self, op: Op) -> Support {
-        if self.trusted.contains(&op) {
+        // No previous-version handle is read yet, so this adapter cannot put an app back (docs/ROLLBACK-DESIGN.md).
+        if op == Op::Restore {
+            Support::No
+        } else if self.trusted.contains(&op) {
             Support::Yes
         } else {
             Support::Unverified
@@ -421,6 +424,7 @@ mod tests {
         secrets: BTreeSet<String>,
         calls: Vec<String>,
         fail_stderr: Option<String>,
+        fail_put_once: bool,
     }
 
     /// A pretend `wrangler` that answers in the shapes the adapter assumes.
@@ -433,6 +437,11 @@ mod tests {
         fn other_app() -> Self {
             let f = Self::new();
             f.0.borrow_mut().exists = true;
+            f
+        }
+        fn failing_secret_put_once() -> Self {
+            let f = Self::new();
+            f.0.borrow_mut().fail_put_once = true;
             f
         }
         fn failing(stderr: &str) -> Self {
@@ -494,6 +503,10 @@ mod tests {
                         .collect();
                     ok(Value::Array(list).to_string())
                 }
+                ["secret", "put", ..] if s.fail_put_once => {
+                    s.fail_put_once = false;
+                    err("A request to the Cloudflare API failed [code: 10000]")
+                }
                 ["secret", "put", name, ..] => {
                     s.calls.push(format!("secret put {name}"));
                     s.secrets.insert(name.to_string());
@@ -539,6 +552,9 @@ mod tests {
             Scenario::Unreachable => target(FakeWrangler::failing(
                 "fetch failed: ENOTFOUND api.cloudflare.com",
             )),
+            Scenario::FailsLastStepOnce => target(FakeWrangler::failing_secret_put_once()),
+            // This adapter cannot restore, so the drop-after-apply check is skipped for it; the scenario still needs a target.
+            Scenario::DropsAfterApply => target(FakeWrangler::new()),
             // Secrets left untrusted: `Unverified` is not `Yes`, so a plan that needs one must be refused.
             Scenario::SecretsUnsupported => {
                 CloudflareTarget::new(FakeWrangler::new(), "worker", |_| true)

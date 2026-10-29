@@ -13,6 +13,8 @@ pub enum Op {
     SetSetting,
     /// Set a secret.
     SetSecret,
+    /// Put the app back to a [`Snapshot`] taken earlier.
+    Restore,
 }
 
 /// What a target declares for an operation. Only `Yes` satisfies a plan; `Unverified` is the default for anything not proven.
@@ -78,6 +80,17 @@ pub struct Observed {
     pub healthy: bool,
 }
 
+/// What a target held before an apply, so it can be put back. Secret names only, never values.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Snapshot {
+    /// Whether the app existed at all.
+    pub existed: bool,
+    /// Its settings and secret names then.
+    pub observed: Observed,
+    /// An adapter-private handle (Cloudflare: the previous version id), if the target has one.
+    pub handle: Option<String>,
+}
+
 /// A place an app can be put. `locate` and `observe` take `&self` so planning cannot change a target.
 pub trait Target {
     /// A short stable name, for messages.
@@ -95,6 +108,34 @@ pub trait Target {
         step: &Step,
         secret: Option<&SecretValue>,
     ) -> Result<(), Error>;
+    /// What is held now, so a later [`Target::restore`] can put it back. Read-only. The default reads `locate` and `observe`.
+    fn snapshot(&self, app_id: &str) -> Result<Snapshot, Error> {
+        Ok(match self.locate(app_id)? {
+            Presence::Ours => Snapshot {
+                existed: true,
+                observed: self.observe(app_id)?,
+                handle: None,
+            },
+            Presence::Absent => Snapshot {
+                existed: false,
+                observed: Observed::default(),
+                handle: None,
+            },
+            Presence::NotOurs => {
+                return Err(Error::NotOurs {
+                    app: app_id.to_string(),
+                });
+            }
+        })
+    }
+    /// Put the app back to `snapshot`. Only called when `supports(Op::Restore)` is `Yes`. Code, settings and secret names only: a secret's old
+    /// value cannot be read back, and data stores are never touched. The default refuses.
+    fn restore(&mut self, _app_id: &str, _snapshot: &Snapshot) -> Result<(), Error> {
+        Err(Error::Unsupported {
+            target: self.name().to_string(),
+            op: Op::Restore,
+        })
+    }
     /// Everything the target has logged so far. The conformance suite searches this for leaked secrets.
     fn diagnostics(&self) -> String;
 }

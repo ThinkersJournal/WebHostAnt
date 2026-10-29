@@ -2,13 +2,16 @@
 
 use std::fmt;
 
-use crate::{AppManifest, Config, Error, Observed, Presence, Secrets, Step, Support, Target};
+use crate::{
+    AppManifest, Config, Error, Observed, Op, Presence, Secrets, Snapshot, Step, Support, Target,
+};
 
 /// An inert list of changes. Holds secret names, never values.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
     app_id: String,
     steps: Vec<Step>,
+    undoable: bool,
 }
 
 impl Plan {
@@ -17,7 +20,13 @@ impl Plan {
         Self {
             app_id: app_id.into(),
             steps,
+            undoable: false,
         }
+    }
+
+    /// Whether the target this plan was made for can put the app back. Always `false` for a hand-built plan: say "cannot undo" unless known.
+    pub fn undoable(&self) -> bool {
+        self.undoable
     }
 
     /// The app this plan is for.
@@ -40,6 +49,9 @@ impl fmt::Display for Plan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.steps.is_empty() {
             return writeln!(f, "{}: nothing to change", self.app_id);
+        }
+        if !self.undoable {
+            writeln!(f, "note: this target cannot undo these changes")?;
         }
         for step in &self.steps {
             match step {
@@ -68,8 +80,66 @@ pub struct ReadBack {
 pub struct Applied {
     /// How many steps ran.
     pub steps_applied: usize,
+    /// What to pass to [`Host::rollback`]. `None` when the target cannot put the app back.
+    pub rollback_point: Option<Box<RollbackPoint>>,
     /// What the target showed afterwards.
     pub read_back: ReadBack,
+}
+
+/// What happened to one step of an apply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepOutcome {
+    /// It ran.
+    Applied,
+    /// It was not attempted, because an earlier step failed.
+    Skipped,
+    /// It was attempted and failed; it may have changed the target partway.
+    Failed,
+}
+
+/// Where the target stood before an apply began. Holds secret names, never values.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RollbackPoint {
+    app_id: String,
+    snapshot: Snapshot,
+    attempted: usize,
+}
+
+impl RollbackPoint {
+    /// The app this point is for.
+    pub fn app_id(&self) -> &str {
+        &self.app_id
+    }
+
+    /// The state to go back to.
+    pub fn snapshot(&self) -> &Snapshot {
+        &self.snapshot
+    }
+}
+
+/// The result of a rollback. Never `Restored` unless the target's own state was read back and matched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Rollback {
+    /// The target now matches the snapshot, as read back.
+    Restored,
+    /// Nothing had been applied, so there was nothing to undo.
+    Unchanged,
+    /// The state is genuinely not known: the restore failed, the host could not be reached, or the read-back did not match.
+    Unknown {
+        /// Why it is not known.
+        reason: String,
+        /// What differed, by name, when the read-back ran and did not match.
+        details: Vec<String>,
+    },
+}
+
+impl Rollback {
+    fn unknown(reason: impl Into<String>) -> Self {
+        Rollback::Unknown {
+            reason: reason.into(),
+            details: Vec::new(),
+        }
+    }
 }
 
 /// A target plus the plan/apply/read-back discipline.
@@ -143,7 +213,13 @@ impl<T: Target> Host<T> {
         Ok(Plan {
             app_id: manifest.id.clone(),
             steps,
+            undoable: self.can_roll_back(),
         })
+    }
+
+    /// Whether this target can put an app back after an apply.
+    pub fn can_roll_back(&self) -> bool {
+        self.target.supports(Op::Restore) == Support::Yes
     }
 
     /// Make the plan so, then read the target's own state back. `Ok` means the read-back matched, not that a command returned.
@@ -167,14 +243,113 @@ impl<T: Target> Host<T> {
                 _ => None,
             });
         }
-        for (step, value) in plan.steps.iter().zip(&values) {
-            self.target.apply_step(&plan.app_id, step, value.as_ref())?;
+        // Read-only, and before the first change, so a refusal here still changes nothing.
+        let snapshot = if self.can_roll_back() {
+            Some(self.target.snapshot(&plan.app_id)?)
+        } else {
+            None
+        };
+        let point = |attempted: usize| {
+            snapshot.as_ref().map(|s| {
+                Box::new(RollbackPoint {
+                    app_id: plan.app_id.clone(),
+                    snapshot: s.clone(),
+                    attempted,
+                })
+            })
+        };
+        let mut outcomes = vec![StepOutcome::Skipped; plan.steps.len()];
+        for (i, (step, value)) in plan.steps.iter().zip(&values).enumerate() {
+            if let Err(cause) = self.target.apply_step(&plan.app_id, step, value.as_ref()) {
+                outcomes[i] = StepOutcome::Failed;
+                return Err(Error::ApplyFailed {
+                    steps: outcomes,
+                    cause: Box::new(cause),
+                    rollback_point: point(i + 1),
+                });
+            }
+            outcomes[i] = StepOutcome::Applied;
         }
-        let read_back = self.verify(plan)?;
-        Ok(Applied {
-            steps_applied: plan.steps.len(),
-            read_back,
-        })
+        match self.verify(plan) {
+            Ok(read_back) => Ok(Applied {
+                steps_applied: plan.steps.len(),
+                rollback_point: point(plan.steps.len()),
+                read_back,
+            }),
+            Err(cause) => Err(Error::ApplyFailed {
+                steps: outcomes,
+                cause: Box::new(cause),
+                rollback_point: point(plan.steps.len()),
+            }),
+        }
+    }
+
+    /// Put the app back to where it stood before the apply that produced `point`, then read the target back.
+    ///
+    /// The answer is never a bare `Ok`: `Restored` only when the target's own state matches the snapshot; otherwise `Unknown`. Code, settings and
+    /// secret names are restored; a secret overwritten by the apply cannot be read back, so its old value is not restored and shows as a difference.
+    pub fn rollback(&mut self, point: &RollbackPoint) -> Rollback {
+        if point.attempted == 0 {
+            return Rollback::Unchanged;
+        }
+        if !self.can_roll_back() {
+            return Rollback::unknown("this target cannot restore");
+        }
+        match self.target.locate(&point.app_id) {
+            Ok(Presence::NotOurs) => {
+                return Rollback::unknown("the target now holds something that is not this app");
+            }
+            Ok(_) => {}
+            Err(e) => return Rollback::unknown(format!("could not reach the target: {e}")),
+        }
+        if let Err(e) = self.target.restore(&point.app_id, &point.snapshot) {
+            return Rollback::unknown(format!("restore failed: {e}"));
+        }
+        self.check_restored(point)
+    }
+
+    fn check_restored(&self, point: &RollbackPoint) -> Rollback {
+        let presence = match self.target.locate(&point.app_id) {
+            Ok(p) => p,
+            Err(e) => return Rollback::unknown(format!("could not read the target back: {e}")),
+        };
+        let want = &point.snapshot;
+        let mut bad = Vec::new();
+        match (want.existed, presence) {
+            (false, Presence::Absent) => {}
+            (false, _) => bad.push("app is still present".to_string()),
+            (true, Presence::Ours) => {
+                let now = match self.target.observe(&point.app_id) {
+                    Ok(o) => o,
+                    Err(e) => {
+                        return Rollback::unknown(format!("could not read the target back: {e}"));
+                    }
+                };
+                for name in want.observed.settings.keys().chain(now.settings.keys()) {
+                    if want.observed.settings.get(name) != now.settings.get(name) {
+                        bad.push(format!("setting {name}"));
+                    }
+                }
+                for name in want
+                    .observed
+                    .secret_names
+                    .symmetric_difference(&now.secret_names)
+                {
+                    bad.push(format!("secret {name}"));
+                }
+                bad.sort();
+                bad.dedup();
+            }
+            (true, _) => bad.push("app is not present".to_string()),
+        }
+        if bad.is_empty() {
+            Rollback::Restored
+        } else {
+            Rollback::Unknown {
+                reason: "the target does not match the snapshot after restoring".to_string(),
+                details: bad,
+            }
+        }
     }
 
     fn verify(&self, plan: &Plan) -> Result<ReadBack, Error> {

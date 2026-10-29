@@ -1,16 +1,15 @@
-# Rollback and partial apply: proposed API
+# Rollback and partial apply
 
-**Proposal, nothing here is built.** Written 2026-10-29 by the WebHostAnt lane against `origin/main` `0b1e96f`. Inputs: `CONSUMER-CONTRACT.md` section 2
+**Built in 0.0.11** (PM rulings 2026-10-29, below). Names differ slightly from the proposal: `StepOutcome`, `Error::ApplyFailed { steps, cause, rollback_point }`, `Host::can_roll_back`, `Plan::undoable`. Originally written 2026-10-29 by the WebHostAnt lane against `origin/main` `0b1e96f`. Inputs: `CONSUMER-CONTRACT.md` section 2
 (rollback line) and the consumer lane's guarantees list (peer message, 2026-10-29). Exact wording of what a host call returns is **UNVERIFIED** until a
 real Cloudflare account exists (D6).
 
 ## Hello-world first
 
 ```rust
-// Intended, not built.
 let applied = host.apply(&plan, &secrets)?;          // today
-let outcome = host.rollback(&applied.rollback_point)?; // new
-assert_eq!(outcome, Rollback::Restored);               // or Rollback::Unknown { left: .. }; never a bare Ok
+let outcome = host.rollback(&applied.rollback_point.unwrap()); // new: None when the target cannot undo
+assert_eq!(outcome, Rollback::Restored);                       // or Rollback::Unknown { reason, details }; never a bare Ok
 ```
 
 ## What is missing today
@@ -41,8 +40,8 @@ ran. Neither can a conformance check say "rollback works".
 - a fault where `restore` does nothing but returns Ok must be caught by the read-back (`Rollback::Unknown`).
 - an unreachable host during rollback yields `Unknown`, never `Restored`.
 
-## Open for CireSnave / the PM
+## Ruled by the PM, 2026-10-29
 
-- Is `Unknown` the right name, or should the consumer see `Failed`? (The consumer lane asked for "unknown".)
-- Adapters that cannot snapshot (no previous-version handle): declare `Op::Restore` as `No`; apply then states up front that it cannot be undone.
+- Keep `Unknown`: after a failed or unverifiable restore the state is genuinely unknown, and `Failed` would claim knowledge we lack. It carries a `reason` (and `details`, the names that differed, when the read-back ran).
+- Adapters that cannot snapshot declare `Op::Restore` = `No`; `Plan` then prints "this target cannot undo these changes" and `apply` returns no rollback point. The Cloudflare adapter does this until it reads a previous-version id (UNVERIFIED, D6).
 - Not covered here: TLS read-back, host-call timeouts. Both are separate slices.
