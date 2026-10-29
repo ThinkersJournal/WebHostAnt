@@ -10,6 +10,7 @@ pub struct AppManifest {
     pub(crate) health_path: String,
     pub(crate) settings: Vec<String>,
     pub(crate) secrets: Vec<String>,
+    pub(crate) domains: Vec<String>,
 }
 
 impl AppManifest {
@@ -20,6 +21,7 @@ impl AppManifest {
             health_path: "/health".to_string(),
             settings: Vec::new(),
             secrets: Vec::new(),
+            domains: Vec::new(),
         }
     }
 
@@ -41,6 +43,12 @@ impl AppManifest {
         self
     }
 
+    /// Declare a host name the app should be served at. The name is checked when a plan is made (`Error::InvalidDomain`).
+    pub fn domain(mut self, name: impl Into<String>) -> Self {
+        self.domains.push(name.into());
+        self
+    }
+
     /// The app id.
     pub fn id(&self) -> &str {
         &self.id
@@ -49,6 +57,56 @@ impl AppManifest {
     /// The health path.
     pub fn health_path(&self) -> &str {
         &self.health_path
+    }
+}
+
+/// Whether `name` is a plain host name: dot-separated labels of letters, digits and hyphens (no scheme, port, path, wildcard or IP literal).
+pub(crate) fn valid_domain(name: &str) -> bool {
+    let labels: Vec<&str> = name.split('.').collect();
+    let label = |l: &&str| {
+        !l.is_empty()
+            && l.len() <= 63
+            && !l.starts_with('-')
+            && !l.ends_with('-')
+            && l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    };
+    name.len() <= 253
+        && labels.len() >= 2
+        && labels.iter().all(label)
+        // A last label of digits only is an IP literal, not a name.
+        && !labels[labels.len() - 1].bytes().all(|b| b.is_ascii_digit())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_domain;
+
+    #[test]
+    fn host_names_are_accepted_and_everything_else_is_not() {
+        for ok in [
+            "app.example.org",
+            "a-b.c1.example.co.uk",
+            "xn--bcher-kva.example",
+        ] {
+            assert!(valid_domain(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "localhost",
+            "https://app.example.org",
+            "app.example.org:8443",
+            "app.example.org/x",
+            "*.example.org",
+            "192.168.0.1",
+            "-a.example.org",
+            "a-.example.org",
+            "a..example.org",
+            "app.example.org.",
+            "ex ample.org",
+            "under_score.example.org",
+        ] {
+            assert!(!valid_domain(bad), "{bad}");
+        }
     }
 }
 

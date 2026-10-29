@@ -59,6 +59,7 @@ impl fmt::Display for Plan {
                 Step::Create => writeln!(f, "create {}", self.app_id)?,
                 Step::SetSetting { name, value } => writeln!(f, "set {name} = {value}")?,
                 Step::SetSecret { name } => writeln!(f, "set secret {name} (value not shown)")?,
+                Step::BindDomain { name } => writeln!(f, "bind domain {name}")?,
             }
         }
         Ok(())
@@ -72,6 +73,8 @@ pub struct ReadBack {
     pub settings: Vec<String>,
     /// Secret names confirmed to exist.
     pub secret_names: Vec<String>,
+    /// Domain names confirmed bound.
+    pub domains: Vec<String>,
     /// Whether the app answered its health check.
     pub healthy: bool,
 }
@@ -178,6 +181,13 @@ impl<T: Target> Host<T> {
 
     /// Work out what would change. Inert: takes `&self` and only reads.
     pub fn plan(&self, manifest: &AppManifest, config: &Config) -> Result<Plan, Error> {
+        if let Some(bad) = manifest
+            .domains
+            .iter()
+            .find(|d| !crate::manifest::valid_domain(d))
+        {
+            return Err(Error::InvalidDomain { name: bad.clone() });
+        }
         let presence = self.target.locate(&manifest.id)?;
         let mut steps = Vec::new();
         let observed = match presence {
@@ -206,6 +216,11 @@ impl<T: Target> Host<T> {
         for name in &manifest.secrets {
             if !observed.secret_names.contains(name) {
                 steps.push(Step::SetSecret { name: name.clone() });
+            }
+        }
+        for name in &manifest.domains {
+            if !observed.domains.contains(name) {
+                steps.push(Step::BindDomain { name: name.clone() });
             }
         }
         for step in &steps {
@@ -398,6 +413,13 @@ impl<T: Target> Host<T> {
                         read_back.secret_names.push(name.clone());
                     } else {
                         bad.push(format!("secret {name}"));
+                    }
+                }
+                Step::BindDomain { name } => {
+                    if observed.domains.contains(name) {
+                        read_back.domains.push(name.clone());
+                    } else {
+                        bad.push(format!("domain {name}"));
                     }
                 }
             }

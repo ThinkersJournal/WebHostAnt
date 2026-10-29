@@ -51,6 +51,11 @@ pub enum Error {
         /// The limit it exceeded.
         after: Duration,
     },
+    /// A domain the manifest declares is not a plain host name. Nothing was changed.
+    InvalidDomain {
+        /// The name as declared.
+        name: String,
+    },
     /// The target reported a failure of its own.
     Target(String),
 }
@@ -102,6 +107,10 @@ impl fmt::Display for Error {
                 f,
                 "`{what}` did not finish within {}s and was stopped; the target may be partly changed, so plan again to see what is left before retrying",
                 after.as_secs_f32()
+            ),
+            Error::InvalidDomain { name } => write!(
+                f,
+                "`{name}` is not a host name WebHostAnt can bind; use letters, digits, hyphens and dots only, like app.example.org (no scheme, port, path, wildcard or address)"
             ),
             Error::Target(msg) => write!(f, "the target reported: {msg}"),
         }
