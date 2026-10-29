@@ -34,6 +34,6 @@ exist (all other Ants are 0.0.0 placeholders: stub behind a trait and say so). O
 PM allocates at gate). Memory rule: CARGO_BUILD_JOBS=2, one build at a time. Repos: ThinkersJournal/WebHostAnt, crate `webhostant` 0.0.0 published.
 
 ## State
-main = 720d722 (0.0.4; contract + edge docs merged, rulings applied). PR feat/contract-types-harness = task 3 (0.0.5, PM allocates): contract types, FakeTarget with faults, conformance suite, README doctest.
-Next: Cloudflare adapter against the contract (needs the two UNVERIFIED facts in DESIGN 3.1 checked first: Containers on the plan, deploy without wrangler); then Humboldt's must-haves follow-up. Not yet in the suite: rollback, unreachable-is-not-absent. Open for CireSnave: D6 test account, D7 ConfigurAnt additions, D8 ReleaseAnt.
-Rulings: Cloudflare only first; secrets pushed (paste fallback); presence = host API then authenticated config retrieval, no unauthenticated tier; local serving waits for WebServAnt (waits for HTTPAnt). Details: ROADMAP.md, docs/CONSUMER-CONTRACT.md.
+main = 6535726 (0.0.5, contract types + conformance suite merged). PR docs/cloudflare-facts (0.0.6): see docs/CLOUDFLARE-FACTS.md.
+Next: Cloudflare adapter via a pinned `wrangler` shell-out (Docker + Node needed on the deploying machine); implement `Target` and run `conformance::run` against it, with the wrangler call behind a trait so tests use a fake runner. Then add Humboldt must-haves follow-up, rollback and unreachable-vs-absent checks to the suite. Open for CireSnave: D6 test account, D7 ConfigurAnt additions, D8 ReleaseAnt.
+Rulings: Cloudflare only first; secrets pushed (paste fallback); presence = host API then authenticated config retrieval, no unauthenticated tier; local serving waits for WebServAnt (waits for HTTPAnt). See ROADMAP.md, docs/CONSUMER-CONTRACT.md.
