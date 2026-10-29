@@ -34,6 +34,6 @@ exist (all other Ants are 0.0.0 placeholders: stub behind a trait and say so). O
 PM allocates at gate). Memory rule: CARGO_BUILD_JOBS=2, one build at a time. Repos: ThinkersJournal/WebHostAnt, crate `webhostant` 0.0.0 published.
 
 ## State
-main = 6535726 (0.0.5, contract types + conformance suite merged). PR docs/cloudflare-facts (0.0.6): see docs/CLOUDFLARE-FACTS.md.
-Next: Cloudflare adapter via a pinned `wrangler` shell-out (Docker + Node needed on the deploying machine); implement `Target` and run `conformance::run` against it, with the wrangler call behind a trait so tests use a fake runner. Then add Humboldt must-haves follow-up, rollback and unreachable-vs-absent checks to the suite. Open for CireSnave: D6 test account, D7 ConfigurAnt additions, D8 ReleaseAnt.
+main = 064f2e9 (0.0.6). PR feat/cloudflare-adapter (0.0.7): `src/cloudflare.rs`, `CloudflareTarget<R: Runner>` over a pinned wrangler (flags read from `--help` of 4.141.0; output shapes UNVERIFIED, marked in code), conformance passes against a fake runner, ops `Unverified` until `trust_operations`.
+Next: (1) gate/merge that PR (PM allocates version); (2) add Humboldt must-haves follow-up, rollback and unreachable-vs-absent checks to the conformance suite; (3) when D6 test account exists, run the suite against real wrangler and verify the UNVERIFIED shapes. Real HTTP health probe waits for HTTPAnt (probe is a closure now). Open for CireSnave: D6 test account, D7 ConfigurAnt additions, D8 ReleaseAnt.
 Rulings: Cloudflare only first; secrets pushed (paste fallback); presence = host API then authenticated config retrieval, no unauthenticated tier; local serving waits for WebServAnt (waits for HTTPAnt). See ROADMAP.md, docs/CONSUMER-CONTRACT.md.
