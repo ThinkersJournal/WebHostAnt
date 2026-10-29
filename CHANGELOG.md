@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.18] - 2026-10-29
+
+- Docs: propose stating before apply whether data can follow a rollback (`docs/DATA-AFTER-ROLLBACK-DESIGN.md`): a `Migrations` policy on the manifest, a per-release flag, `DataAfterRollback` on the plan and in its digest. No code change. Version provisional; the PM allocates.
+
 ## [0.0.17] - 2026-10-29
 
 - Docs: `docs/CLOUDFLARE-FACTS.md` records that Cloudflare custom domains have no wrangler bind or list command. Ruled by the PM: no Cloudflare `BindDomain`/`ReadTls` adapter until the D6 test account exists and HTTPAnt can carry REST calls. No code change.
