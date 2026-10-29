@@ -12,3 +12,13 @@ verified against the page by eye. Dated record: re-check before building on it.
 client, and say so in the capability rows: `deploy.image` is `Yes` only through `wrangler`. Whether a deploy by image digest, or by API alone, exists
 elsewhere in Cloudflare's docs is **not checked**. A school without Docker and Node on the installing machine cannot use this path; the installer must
 say so before it starts.
+
+## Custom domains (read 2026-10-29, same method and caveat)
+
+From developers.cloudflare.com/workers/configuration/routing/custom-domains/: with Wrangler a Custom Domain is created by a `[[routes]]` entry with
+`custom_domain = true` in the Worker config, then `wrangler deploy`; the page documents **no `--domain` flag** and **no Wrangler command to list** attached
+domains. Listing is the Workers domains REST API (endpoint path not read).
+
+**Consequence for BindDomain:** the Cloudflare adapter cannot bind or read back a domain through the `wrangler` calls it makes today. Either it edits the
+project's own Wrangler config (the consumer owns that file), or it calls the REST API (new dependency: an API token and account id, and an HTTP client
+which waits for HTTPAnt). `supports(BindDomain)` and `ReadTls` stay `No`/`Unverified` for Cloudflare until one is chosen. Asked of the PM.
