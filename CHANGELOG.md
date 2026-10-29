@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.17] - 2026-10-29
+
+- Docs: `docs/CLOUDFLARE-FACTS.md` records that Cloudflare custom domains have no wrangler bind or list command. Ruled by the PM: no Cloudflare `BindDomain`/`ReadTls` adapter until the D6 test account exists and HTTPAnt can carry REST calls. No code change.
+
 ## [0.0.16] - 2026-10-29
 
 - Approved plans only (CONSUMER-CONTRACT section 2: "a hash so a tampered plan is refused"): `Plan::digest()` is a SHA-256 fingerprint of the app, undo note and every step (setting values, secret names only); `Host::apply_approved(plan, digest, secrets)` refuses a changed plan with the new `Error::PlanChanged` before the target is touched. `Host::apply` is unchanged. New dependency `sha2`. Mutation (digest ignores steps) fails two tests. Breaking pre-1.0: `Error` gains a variant. Version provisional; the PM allocates at gate.
