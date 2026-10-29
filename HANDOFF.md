@@ -34,7 +34,7 @@ exist (all other Ants are 0.0.0 placeholders: stub behind a trait and say so). O
 PM allocates at gate). Memory rule: CARGO_BUILD_JOBS=2, one build at a time. Repos: ThinkersJournal/WebHostAnt, crate `webhostant` 0.0.0 published.
 
 ## State
-main = bc867425 (0.0.11): timeouts (#10) and rollback (#11) merged. PR tls-read-back (0.0.12, `Host::tls_status`, read-only) in review. Next PR version: PM allocates.
+main = 1b20bcbc (0.0.12): timeouts (#10), rollback (#11), TLS read-back (#12) merged. No PR open, no worktree. PR docs/domains-design (0.0.13) proposes domain setup (docs/DOMAINS-DESIGN.md); build it after PM answers. Version: PM allocates.
 TASK 1 (done): rollback, per-step results, timeouts. Next unblocked slices: setting up domains (needs a manifest field + Step; design first), anything from the Humboldt lane's guarantees list not yet built.
 TASK 2 (blocked on CireSnave D6 test account): run the suite against real wrangler and verify the UNVERIFIED output shapes in `cloudflare.rs`. Real HTTP health probe waits for HTTPAnt (probe is a closure now). Open for CireSnave: D6, D7 ConfigurAnt additions, D8 ReleaseAnt.
 Rulings: Cloudflare only first; secrets pushed (paste fallback); presence = host API then authenticated config retrieval, no unauthenticated tier; local serving waits for WebServAnt (waits for HTTPAnt). See ROADMAP.md, docs/CONSUMER-CONTRACT.md.
