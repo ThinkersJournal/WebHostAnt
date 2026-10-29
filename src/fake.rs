@@ -5,7 +5,9 @@
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{Error, Observed, Op, Presence, SecretValue, Snapshot, Step, Support, Target};
+use crate::{
+    Error, Observed, Op, Presence, Renewal, SecretValue, Snapshot, Step, Support, Target, TlsStatus,
+};
 
 /// A deliberate defect, to prove the conformance suite can see it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +24,8 @@ pub enum Fault {
     UnreachableIsAbsent,
     /// `restore` reports success and does nothing.
     RestoreDoesNothing,
+    /// `tls_status` answers with an empty status when the host cannot be reached.
+    TlsEmptyInsteadOfError,
 }
 
 /// An in-memory target.
@@ -113,7 +117,7 @@ impl Target for FakeTarget {
     fn supports(&self, op: Op) -> Support {
         match op {
             Op::SetSecret => self.secrets_support,
-            Op::Create | Op::SetSetting | Op::Restore => Support::Yes,
+            Op::Create | Op::SetSetting | Op::Restore | Op::ReadTls => Support::Yes,
         }
     }
 
@@ -197,6 +201,26 @@ impl Target for FakeTarget {
             self.unreachable = true;
         }
         Ok(())
+    }
+
+    fn tls_status(&self, _app_id: &str) -> Result<TlsStatus, Error> {
+        if self.fault == Fault::TlsEmptyInsteadOfError && self.unreachable {
+            return Ok(TlsStatus {
+                names: Vec::new(),
+                not_after: None,
+                issuer: None,
+                last_renewal: Renewal::Unknown,
+            });
+        }
+        if self.unreachable {
+            return Err(Error::Target("host unreachable".to_string()));
+        }
+        Ok(TlsStatus {
+            names: vec!["app.example.invalid".to_string()],
+            not_after: Some("2099-01-01T00:00:00Z".to_string()),
+            issuer: Some("Fake CA".to_string()),
+            last_renewal: Renewal::Succeeded,
+        })
     }
 
     fn restore(&mut self, _app_id: &str, snapshot: &Snapshot) -> Result<(), Error> {

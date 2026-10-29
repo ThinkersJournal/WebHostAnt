@@ -34,8 +34,8 @@ exist (all other Ants are 0.0.0 placeholders: stub behind a trait and say so). O
 PM allocates at gate). Memory rule: CARGO_BUILD_JOBS=2, one build at a time. Repos: ThinkersJournal/WebHostAnt, crate `webhostant` 0.0.0 published.
 
 ## State
-main = 36f03d2 (0.0.9): conformance unreachable check (#8) and docs/ROLLBACK-DESIGN.md (#9) merged. Primary clean, no PR open, no worktree. Next PR version: PM allocates.
-TASK 1: rollback ruled by the PM 2026-10-29 (keep `Unknown` + reason; no-snapshot adapters declare Restore=No) and built in PR `rollback` (0.0.11, stacked on #10, in review). When #10 merges, `git rebase --onto origin/main host-call-timeouts rollback` (squash-merge: see portfolio rule 4). Unblocked meanwhile: host-call timeouts (PR host-call-timeouts, 0.0.10, in review) and TLS read-back (next, not started) are separate slices (Humboldt lane guarantees, 2026-10-29).
+main = bc867425 (0.0.11): timeouts (#10) and rollback (#11) merged. PR tls-read-back (0.0.12, `Host::tls_status`, read-only) in review. Next PR version: PM allocates.
+TASK 1 (done): rollback, per-step results, timeouts. Next unblocked slices: setting up domains (needs a manifest field + Step; design first), anything from the Humboldt lane's guarantees list not yet built.
 TASK 2 (blocked on CireSnave D6 test account): run the suite against real wrangler and verify the UNVERIFIED output shapes in `cloudflare.rs`. Real HTTP health probe waits for HTTPAnt (probe is a closure now). Open for CireSnave: D6, D7 ConfigurAnt additions, D8 ReleaseAnt.
 Rulings: Cloudflare only first; secrets pushed (paste fallback); presence = host API then authenticated config retrieval, no unauthenticated tier; local serving waits for WebServAnt (waits for HTTPAnt). See ROADMAP.md, docs/CONSUMER-CONTRACT.md.
 Gotchas: files are CRLF-in-worktree/LF-in-blob; scripted replaces must assert count==1. Commit this HANDOFF.md edit in the next PR.

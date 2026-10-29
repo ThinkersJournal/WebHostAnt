@@ -4,6 +4,7 @@ use std::fmt;
 
 use crate::{
     AppManifest, Config, Error, Observed, Op, Presence, Secrets, Snapshot, Step, Support, Target,
+    TlsStatus,
 };
 
 /// An inert list of changes. Holds secret names, never values.
@@ -215,6 +216,24 @@ impl<T: Target> Host<T> {
             steps,
             undoable: self.can_roll_back(),
         })
+    }
+
+    /// What the target says about the app's domains and certificate. Read-only. An app that is absent or not ours, an unreachable host and a
+    /// target that cannot report this are errors; an empty status is never made up.
+    pub fn tls_status(&self, app_id: &str) -> Result<TlsStatus, Error> {
+        if self.target.supports(Op::ReadTls) != Support::Yes {
+            return Err(Error::Unsupported {
+                target: self.target.name().to_string(),
+                op: Op::ReadTls,
+            });
+        }
+        match self.target.locate(app_id)? {
+            Presence::Ours => self.target.tls_status(app_id),
+            Presence::NotOurs => Err(Error::NotOurs {
+                app: app_id.to_string(),
+            }),
+            Presence::Absent => Err(Error::Target("the app is not deployed".to_string())),
+        }
     }
 
     /// Whether this target can put an app back after an apply.

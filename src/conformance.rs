@@ -18,8 +18,8 @@
 //! Checks here: plan is inert, apply is proven by read-back, apply is idempotent, no secret leaks, a refusal changes nothing, a target
 //! that is not ours is never overwritten, an unsupported operation is an error, a host that cannot be reached is never reported as "nothing
 //! installed", a failed apply says which steps ran and a re-run finishes it, a target that can restore puts the app back and proves it by
-//! read-back (and says `Unknown`, never `Restored`, when it cannot tell), and a target that cannot restore says so before apply. Not yet
-//! covered: TLS read-back.
+//! read-back (and says `Unknown`, never `Restored`, when it cannot tell), and a target that cannot restore says so before apply, and domain/certificate status is read from the target, never made up. Not yet
+//! covered: setting up domains.
 
 use crate::{
     AppManifest, Config, Error, Host, MapSecrets, Presence, Rollback, Secrets, Step, StepOutcome,
@@ -93,6 +93,7 @@ pub fn run<T: Target>(make: impl Fn(Scenario) -> T) -> Vec<Failure> {
     rollback_restores_the_snapshot(&make, &mut out);
     failed_apply_can_be_rolled_back(&make, &mut out);
     rollback_never_claims_more_than_it_knows(&make, &mut out);
+    tls_status_is_read_never_made_up(&make, &mut out);
     out
 }
 
@@ -453,6 +454,60 @@ fn rollback_never_claims_more_than_it_knows<T: Target>(
     }
 }
 
+fn tls_status_is_read_never_made_up<T: Target>(
+    make: &impl Fn(Scenario) -> T,
+    out: &mut Vec<Failure>,
+) {
+    const C: &str = "domain and certificate status is read from the target, never made up";
+    let mut host = Host::new(make(Scenario::Empty));
+    if host.target().supports(crate::Op::ReadTls) != Support::Yes {
+        match host.tls_status("conformance-app") {
+            Err(Error::Unsupported { .. }) => {}
+            other => fail(
+                out,
+                C,
+                format!("unsupported: expected Unsupported, got {other:?}"),
+            ),
+        }
+        return;
+    }
+    if let Ok(s) = host.tls_status("conformance-app") {
+        fail(
+            out,
+            C,
+            format!("an app that is not deployed returned {s:?}"),
+        );
+    }
+    match host.plan(&manifest(), &config()) {
+        Ok(plan) => {
+            if let Err(e) = host.apply(&plan, &secrets()) {
+                return fail(out, C, format!("apply failed: {e}"));
+            }
+        }
+        Err(e) => return fail(out, C, format!("planning failed: {e}")),
+    }
+    if let Err(e) = host.tls_status("conformance-app") {
+        fail(out, C, format!("a deployed app has no status: {e}"));
+    }
+    let other = Host::new(make(Scenario::HoldsOtherApp));
+    match other.tls_status("conformance-app") {
+        Err(Error::NotOurs { .. }) => {}
+        got => fail(out, C, format!("not ours: expected NotOurs, got {got:?}")),
+    }
+    let down = Host::new(make(Scenario::Unreachable));
+    if let Ok(s) = down.tls_status("conformance-app") {
+        fail(out, C, format!("an unreachable host returned {s:?}"));
+    }
+    // The adapter itself, without the host's guard: it must not answer for a host it cannot reach.
+    if let Ok(s) = down.target().tls_status("conformance-app") {
+        fail(
+            out,
+            C,
+            format!("the adapter answered for an unreachable host: {s:?}"),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -507,6 +562,14 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_tls_status_instead_of_an_error_is_caught() {
+        assert!(
+            checks(Fault::TlsEmptyInsteadOfError)
+                .contains(&"domain and certificate status is read from the target, never made up")
+        );
+    }
+
+    #[test]
     fn a_restore_that_does_nothing_is_caught() {
         assert!(
             checks(Fault::RestoreDoesNothing)
@@ -547,6 +610,7 @@ mod tests {
     #[test]
     fn a_failure_never_contains_the_canary() {
         for fault in [
+            Fault::TlsEmptyInsteadOfError,
             Fault::RestoreDoesNothing,
             Fault::SilentNoop,
             Fault::LeaksSecret,

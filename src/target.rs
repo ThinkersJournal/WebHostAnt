@@ -15,6 +15,8 @@ pub enum Op {
     SetSecret,
     /// Put the app back to a [`Snapshot`] taken earlier.
     Restore,
+    /// Read the app's domain and certificate status.
+    ReadTls,
 }
 
 /// What a target declares for an operation. Only `Yes` satisfies a plan; `Unverified` is the default for anything not proven.
@@ -91,6 +93,30 @@ pub struct Snapshot {
     pub handle: Option<String>,
 }
 
+/// How the last certificate renewal went, as the target reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Renewal {
+    /// It succeeded.
+    Succeeded,
+    /// It failed; the target's own words, with no secret in them.
+    Failed(String),
+    /// The target does not say.
+    Unknown,
+}
+
+/// The app's domain and certificate status, read from the target itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TlsStatus {
+    /// Host names bound to the app.
+    pub names: Vec<String>,
+    /// When the certificate stops being valid, as the target reports it (RFC 3339 text), if it says.
+    pub not_after: Option<String>,
+    /// Who issued the certificate, if the target says.
+    pub issuer: Option<String>,
+    /// How the last renewal went.
+    pub last_renewal: Renewal,
+}
+
 /// A place an app can be put. `locate` and `observe` take `&self` so planning cannot change a target.
 pub trait Target {
     /// A short stable name, for messages.
@@ -134,6 +160,13 @@ pub trait Target {
         Err(Error::Unsupported {
             target: self.name().to_string(),
             op: Op::Restore,
+        })
+    }
+    /// The app's domain and certificate status. Only called when `supports(Op::ReadTls)` is `Yes` and `locate` says `Ours`. The default refuses.
+    fn tls_status(&self, _app_id: &str) -> Result<TlsStatus, Error> {
+        Err(Error::Unsupported {
+            target: self.name().to_string(),
+            op: Op::ReadTls,
         })
     }
     /// Everything the target has logged so far. The conformance suite searches this for leaked secrets.
