@@ -3,6 +3,19 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+/// What a consumer says about its data when code is rolled back (contract section 1, row 6). WebHostAnt carries this; it never checks it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Migrations {
+    /// The app holds no data worth protecting.
+    NoData,
+    /// Every migration can be reversed.
+    Reversible,
+    /// Forward-only, additive-only: older code still runs on the new data.
+    ForwardOnlyOlderTolerates,
+    /// Forward-only, and older code refuses the new schema.
+    ForwardOnlyOlderRefuses,
+}
+
 /// The app, as the consumer describes it. Names only for secrets.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppManifest {
@@ -11,6 +24,7 @@ pub struct AppManifest {
     pub(crate) settings: Vec<String>,
     pub(crate) secrets: Vec<String>,
     pub(crate) domains: Vec<String>,
+    pub(crate) migrations: Option<Migrations>,
 }
 
 impl AppManifest {
@@ -22,6 +36,7 @@ impl AppManifest {
             settings: Vec::new(),
             secrets: Vec::new(),
             domains: Vec::new(),
+            migrations: None,
         }
     }
 
@@ -46,6 +61,12 @@ impl AppManifest {
     /// Declare a host name the app should be served at. The name is checked when a plan is made (`Error::InvalidDomain`).
     pub fn domain(mut self, name: impl Into<String>) -> Self {
         self.domains.push(name.into());
+        self
+    }
+
+    /// Declare the data policy. Left undeclared, a plan says the answer is unknown, never that data follows.
+    pub fn migrations(mut self, policy: Migrations) -> Self {
+        self.migrations = Some(policy);
         self
     }
 
