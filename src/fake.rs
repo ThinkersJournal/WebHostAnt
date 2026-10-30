@@ -204,7 +204,7 @@ impl Target for FakeTarget {
                 if self.fault == Fault::LeaksSecret {
                     self.log.push(format!("set secret {name}={value}"));
                 } else {
-                    self.log.push(format!("set secret {name}"));
+                    self.log.push("set secret".to_string());
                 }
                 self.secret_values.insert(name.clone(), value);
             }

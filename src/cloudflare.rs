@@ -30,9 +30,20 @@ pub struct Call {
     pub stdin: Option<SecretValue>,
 }
 
+impl Call {
+    /// The call as a person may read it in a log or an error: a secret's name is withheld (which secrets a host holds is not for logs).
+    fn describe(&self) -> String {
+        if self.args.len() >= 3 && self.args[0] == "secret" && self.args[1] == "put" {
+            let rest = self.args[3..].join(" ");
+            return format!("wrangler secret put <name withheld> {rest}");
+        }
+        format!("wrangler {}", self.args.join(" "))
+    }
+}
+
 impl std::fmt::Debug for Call {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "wrangler {}", self.args.join(" "))?;
+        write!(f, "{}", self.describe())?;
         if self.stdin.is_some() {
             write!(f, " <stdin redacted>")?;
         }
@@ -92,12 +103,7 @@ impl Runner for ProcessRunner {
             Command::new("wrangler")
         };
         cmd.args(&call.args);
-        run_bounded(
-            cmd,
-            call.stdin.as_ref(),
-            self.timeout,
-            &format!("wrangler {}", call.args.join(" ")),
-        )
+        run_bounded(cmd, call.stdin.as_ref(), self.timeout, &call.describe())
     }
 }
 
@@ -387,7 +393,7 @@ impl<R: Runner> Target for CloudflareTarget<R> {
             ),
             Step::SetSecret { name } => {
                 let value = secret
-                    .ok_or_else(|| Error::Target(format!("no value supplied for secret {name}")))?;
+                    .ok_or_else(|| Error::Target("no value supplied for a secret".to_string()))?;
                 let call = Call {
                     args: ["secret", "put", name, "--name", app_id]
                         .iter()
@@ -395,7 +401,7 @@ impl<R: Runner> Target for CloudflareTarget<R> {
                         .collect(),
                     stdin: Some(value.clone()),
                 };
-                (format!("secret put {name}"), self.runner.run(&call)?)
+                ("secret put".to_string(), self.runner.run(&call)?)
             }
         };
         let redact = |text: &str| match secret {
@@ -613,6 +619,40 @@ mod tests {
             .unwrap_err();
         assert!(!e.to_string().contains("CANARY-xyz"), "{e}");
         assert!(!t.diagnostics().contains("CANARY-xyz"));
+    }
+
+    #[test]
+    fn no_log_error_or_call_text_carries_a_secret_name() {
+        const NAME: &str = "ZZ_FAKE_SECRET_NAME_91";
+        let step = Step::SetSecret {
+            name: NAME.to_string(),
+        };
+        let value = SecretValue::new("CANARY-xyz");
+        // A success, a failure, and the text of the call itself.
+        let mut ok = target(FakeWrangler::new());
+        ok.apply_step("x", &step, Some(&value)).unwrap();
+        assert!(
+            !ok.diagnostics().contains(NAME),
+            "{}",
+            ok.diagnostics().len()
+        );
+        let w = FakeWrangler::new();
+        w.0.borrow_mut().fail_stderr = Some("rejected".to_string());
+        let mut bad = target(w);
+        let e = bad.apply_step("x", &step, Some(&value)).unwrap_err();
+        assert!(!e.to_string().contains(NAME));
+        assert!(!bad.diagnostics().contains(NAME));
+        let missing = bad.apply_step("x", &step, None).unwrap_err();
+        assert!(!missing.to_string().contains(NAME));
+        let call = Call {
+            args: ["secret", "put", NAME, "--name", "x"]
+                .iter()
+                .map(|a| a.to_string())
+                .collect(),
+            stdin: Some(value),
+        };
+        assert!(!format!("{call:?}").contains(NAME));
+        assert!(call.describe().contains("--name x"));
     }
 
     #[test]

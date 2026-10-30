@@ -671,8 +671,8 @@ mod tests {
             Release::MigratesSchema,
         );
         let text = plan.to_string();
-        assert!(text.contains("REFUSE"), "{text}");
-        assert!(!text.contains("will run on the data"), "{text}");
+        assert!(text.contains("REFUSE"));
+        assert!(!text.contains("will run on the data"));
     }
 
     #[test]
