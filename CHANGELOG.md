@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.26] - 2026-10-31
+
+- Domain binding for Cloudflare over the Workers REST API (`cloudflare_domains`: `Rest` trait, `Domains` list/attach/detach, `HttpRest` on httpant-client with the private-address guard on and redirects off). `CloudflareTarget::with_domains` turns `BindDomain` from `No` to `Unverified` (and `Yes` once trusted); `observe` then reads the app's bound hostnames. Shapes are those of Cloudflare's published OpenAPI schema, **not** a recorded live answer (D6): tests use a fake that answers in those shapes. Negative controls (each mutation fails a test): a hostname held by another Worker is never overwritten (no write is sent); an attach answer naming a different hostname is refused; a `success:false`, non-2xx or non-JSON answer is an error that carries Cloudflare's code and message; more than one page is refused, not truncated; ids that could add path segments are refused; the API token never appears in `Debug` or errors. The conformance suite passes with domains bound through the fake REST. `ReadTls` is still `Unverified` (certificate fields not extracted). Version provisional; the PM allocates.
+
 ## [0.0.25] - 2026-10-31
 
 - Docs: the Workers custom-domains REST calls (list, get, attach, detach) read from Cloudflare's published OpenAPI schema into `docs/CLOUDFLARE-FACTS.md`, with what the schema does not say (idempotence, the code for a hostname held by another Worker, certificate expiry); this replaces "endpoint path not read". New `docs/RELEASE-CHECKLIST.md`: the by-hand check before a release that touches the Cloudflare adapter, until the D6 test account exists. No code change. Version provisional; the PM allocates.

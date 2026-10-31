@@ -9,6 +9,7 @@ mod probe;
 mod target;
 
 pub mod cloudflare;
+pub mod cloudflare_domains;
 pub mod conformance;
 pub mod fake;
 

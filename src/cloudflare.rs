@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+use crate::cloudflare_domains::{Domains, Rest};
 use crate::{Error, Observed, Op, Presence, SecretValue, Step, Support, Target};
 
 /// The plain setting that marks a Worker as deployed by WebHostAnt for this app id. A Worker without it is never ours.
@@ -185,6 +186,7 @@ pub struct CloudflareTarget<R: Runner> {
     runner: R,
     project_dir: PathBuf,
     probe: Box<dyn Fn(&str) -> bool>,
+    domains: Option<Domains<Box<dyn Rest>>>,
     trusted: BTreeSet<Op>,
     log: RefCell<Vec<String>>,
 }
@@ -223,9 +225,16 @@ impl<R: Runner> CloudflareTarget<R> {
             runner,
             project_dir: project_dir.into(),
             probe: Box::new(probe),
+            domains: None,
             trusted: BTreeSet::new(),
             log: RefCell::new(Vec::new()),
         }
+    }
+
+    /// Bind domains through the Workers REST API ([`Domains`]). Without this, `BindDomain` is `No`. Still `Unverified` until trusted.
+    pub fn with_domains(mut self, domains: Domains<Box<dyn Rest>>) -> Self {
+        self.domains = Some(domains);
+        self
     }
 
     /// Report these operations as `Yes` instead of `Unverified`. Use only after a real run has passed the conformance suite.
@@ -362,8 +371,8 @@ impl<R: Runner> Target for CloudflareTarget<R> {
 
     fn supports(&self, op: Op) -> Support {
         // No previous-version handle is read yet, so this adapter cannot put an app back (docs/ROLLBACK-DESIGN.md).
-        // Domain binding is not built for this adapter yet (docs/DOMAINS-DESIGN.md); never claim it.
-        if op == Op::Restore || op == Op::BindDomain {
+        // Domain binding needs the REST API configured (`with_domains`); without it never claim it.
+        if op == Op::Restore || (op == Op::BindDomain && self.domains.is_none()) {
             Support::No
         } else if self.trusted.contains(&op) {
             Support::Yes
@@ -388,7 +397,14 @@ impl<R: Runner> Target for CloudflareTarget<R> {
         Ok(Observed {
             settings,
             secret_names: self.secret_names(app_id)?,
-            domains: Default::default(),
+            domains: match &self.domains {
+                Some(d) => d
+                    .list(Some(app_id), None)?
+                    .into_iter()
+                    .map(|x| x.hostname)
+                    .collect(),
+                None => Default::default(),
+            },
             healthy: (self.probe)(app_id),
         })
     }
@@ -400,11 +416,16 @@ impl<R: Runner> Target for CloudflareTarget<R> {
         secret: Option<&SecretValue>,
     ) -> Result<(), Error> {
         let (call_text, out) = match step {
-            Step::BindDomain { .. } => {
-                return Err(Error::Unsupported {
-                    target: "cloudflare".to_string(),
-                    op: Op::BindDomain,
-                });
+            Step::BindDomain { name } => {
+                let Some(domains) = &self.domains else {
+                    return Err(Error::Unsupported {
+                        target: "cloudflare".to_string(),
+                        op: Op::BindDomain,
+                    });
+                };
+                domains.attach(name, app_id)?;
+                self.log.borrow_mut().push("bind domain".to_string());
+                return Ok(());
             }
             Step::Create => ("deploy".to_string(), self.deploy(app_id, &[])?),
             Step::SetSetting { name, value } => (
@@ -593,6 +614,51 @@ mod tests {
             }
         });
         assert!(failures.is_empty(), "{failures:?}");
+    }
+
+    fn with_rest_domains(w: FakeWrangler, trust_bind: bool) -> CloudflareTarget<FakeWrangler> {
+        use crate::cloudflare_domains::{Domains, Rest, tests::FakeRest};
+        let rest: Box<dyn Rest> = Box::new(FakeRest::default());
+        let ops: &[Op] = if trust_bind {
+            &[Op::Create, Op::SetSetting, Op::SetSecret, Op::BindDomain]
+        } else {
+            &[Op::Create, Op::SetSetting, Op::SetSecret]
+        };
+        CloudflareTarget::new(w, "worker", |_| true)
+            .with_domains(Domains::new(rest, "acct1", "zone1").unwrap())
+            .trust_operations(ops)
+    }
+
+    #[test]
+    fn the_conformance_suite_passes_with_domains_bound_through_the_rest_api() {
+        let failures = conformance::run(|scenario| match scenario {
+            Scenario::Empty | Scenario::DropsAfterApply => {
+                with_rest_domains(FakeWrangler::new(), true)
+            }
+            Scenario::HoldsOtherApp => with_rest_domains(FakeWrangler::other_app(), true),
+            Scenario::Unreachable => with_rest_domains(
+                FakeWrangler::failing("fetch failed: ENOTFOUND api.cloudflare.com"),
+                true,
+            ),
+            Scenario::FailsLastStepOnce => {
+                with_rest_domains(FakeWrangler::failing_secret_put_once(), true)
+            }
+            Scenario::SecretsUnsupported => {
+                CloudflareTarget::new(FakeWrangler::new(), "worker", |_| true)
+                    .trust_operations(&[Op::Create, Op::SetSetting])
+            }
+        });
+        assert!(failures.is_empty(), "{failures:?}");
+    }
+
+    #[test]
+    fn bind_domain_is_no_without_rest_and_unverified_until_trusted() {
+        let plain = target(FakeWrangler::new());
+        assert_eq!(plain.supports(Op::BindDomain), Support::No);
+        let configured = with_rest_domains(FakeWrangler::new(), false);
+        assert_eq!(configured.supports(Op::BindDomain), Support::Unverified);
+        let trusted = with_rest_domains(FakeWrangler::new(), true);
+        assert_eq!(trusted.supports(Op::BindDomain), Support::Yes);
     }
 
     #[test]
