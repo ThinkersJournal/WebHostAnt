@@ -189,6 +189,26 @@ pub struct CloudflareTarget<R: Runner> {
     log: RefCell<Vec<String>>,
 }
 
+fn strings(args: &[&str]) -> Vec<String> {
+    args.iter().map(|a| a.to_string()).collect()
+}
+
+fn deployments_list_args(app_id: &str) -> Vec<String> {
+    strings(&["deployments", "list", "--name", app_id, "--json"])
+}
+
+fn versions_view_args(version: &str, app_id: &str) -> Vec<String> {
+    strings(&["versions", "view", version, "--name", app_id, "--json"])
+}
+
+fn secret_list_args(app_id: &str) -> Vec<String> {
+    strings(&["secret", "list", "--name", app_id, "--format", "json"])
+}
+
+fn secret_put_args(name: &str, app_id: &str) -> Vec<String> {
+    strings(&["secret", "put", name, "--name", app_id])
+}
+
 impl<R: Runner> CloudflareTarget<R> {
     /// `project_dir` holds the Worker's `wrangler` config. `probe` answers whether the app's health path answers for an app id; it is a
     /// parameter because HTTP calls belong to HTTPAnt, which is not built yet.
@@ -212,18 +232,13 @@ impl<R: Runner> CloudflareTarget<R> {
         self
     }
 
-    fn call(&self, args: &[&str]) -> Call {
-        Call {
-            args: args.iter().map(|a| a.to_string()).collect(),
-            stdin: None,
-        }
+    fn call(&self, args: Vec<String>) -> Call {
+        Call { args, stdin: None }
     }
 
     /// The Worker's plain bindings, or `None` when the Worker does not exist.
     fn bindings(&self, app_id: &str) -> Result<Option<BTreeMap<String, String>>, Error> {
-        let list =
-            self.runner
-                .run(&self.call(&["deployments", "list", "--name", app_id, "--json"]))?;
+        let list = self.runner.run(&self.call(deployments_list_args(app_id)))?;
         if !list.success {
             return if looks_absent(&list.stderr) {
                 Ok(None)
@@ -252,7 +267,7 @@ impl<R: Runner> CloudflareTarget<R> {
             })?;
         let view = self
             .runner
-            .run(&self.call(&["versions", "view", &version, "--name", app_id, "--json"]))?;
+            .run(&self.call(versions_view_args(&version, app_id)))?;
         if !view.success {
             return Err(Error::Target(format!(
                 "could not read the deployed version: {}",
@@ -281,9 +296,7 @@ impl<R: Runner> CloudflareTarget<R> {
     }
 
     fn secret_names(&self, app_id: &str) -> Result<BTreeSet<String>, Error> {
-        let out = self
-            .runner
-            .run(&self.call(&["secret", "list", "--name", app_id, "--format", "json"]))?;
+        let out = self.runner.run(&self.call(secret_list_args(app_id)))?;
         if !out.success {
             return Err(Error::Target(format!(
                 "could not list secrets: {}",
@@ -400,10 +413,7 @@ impl<R: Runner> Target for CloudflareTarget<R> {
                 let value = secret
                     .ok_or_else(|| Error::Target("no value supplied for a secret".to_string()))?;
                 let call = Call {
-                    args: ["secret", "put", name, "--name", app_id]
-                        .iter()
-                        .map(|a| a.to_string())
-                        .collect(),
+                    args: secret_put_args(name, app_id),
                     stdin: Some(value.clone()),
                 };
                 ("secret put".to_string(), self.runner.run(&call)?)
@@ -762,5 +772,73 @@ compatibility_date = \"2025-01-01\"
         // Positive control: the same call with a flag wrangler does not know must fail, so the test above is not a pass-through.
         let out = dry_run_deploy(Some("--no-such-flag"));
         assert!(!out.success);
+    }
+
+    /// Run real `wrangler` with no credentials and an empty config directory, so it checks its arguments and then stops at "set a
+    /// CLOUDFLARE_API_TOKEN" before any network call (it cannot touch a real account, even on a machine where someone is logged in).
+    fn without_credentials(args: &[String]) -> String {
+        let cfg = std::env::temp_dir().join(format!("webhostant-noauth-{}", std::process::id()));
+        std::fs::create_dir_all(&cfg).unwrap();
+        let mut cmd = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.args(["/C", "wrangler"]);
+            c
+        } else {
+            Command::new("wrangler")
+        };
+        let out = cmd
+            .args(args)
+            .env("CI", "1")
+            .env("XDG_CONFIG_HOME", &cfg)
+            .env("WRANGLER_SEND_METRICS", "false")
+            .env_remove("CLOUDFLARE_API_TOKEN")
+            .env_remove("CLOUDFLARE_API_KEY")
+            .env_remove("CLOUDFLARE_EMAIL")
+            .env_remove("CLOUDFLARE_ACCOUNT_ID")
+            .stdin(Stdio::null())
+            .output()
+            .expect("wrangler must be installed (npm i -g wrangler); CI installs it");
+        let _ = std::fs::remove_dir_all(&cfg);
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        )
+    }
+
+    const NOT_PARSED: [&str; 4] = [
+        "Unknown argument",
+        "Unknown command",
+        "Not enough non-option arguments",
+        "Too many non-option arguments",
+    ];
+
+    #[test]
+    fn real_wrangler_accepts_the_arguments_of_every_read_and_secret_call() {
+        for args in [
+            deployments_list_args("some-app"),
+            versions_view_args("0000-version", "some-app"),
+            secret_list_args("some-app"),
+            secret_put_args("SOME_NAME", "some-app"),
+        ] {
+            let text = without_credentials(&args);
+            assert!(
+                text.contains("non-interactive environment"),
+                "{args:?} never got past argument checking: {text}"
+            );
+            for bad in NOT_PARSED {
+                assert!(!text.contains(bad), "{args:?}: {text}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_argument_check_can_fail() {
+        // Positive control: an unknown flag on a real call is reported by wrangler, so the test above is not a pass-through.
+        let mut args = deployments_list_args("some-app");
+        args.push("--no-such-flag".to_string());
+        let text = without_credentials(&args);
+        assert!(text.contains("Unknown argument"), "{text}");
+        assert!(!text.contains("non-interactive environment"), "{text}");
     }
 }
