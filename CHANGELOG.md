@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.21] - 2026-10-31
+
+- Docs: `docs/HTTPS-CLIENT-NEEDS.md`, what WebHostAnt needs from the HTTPAnt client for https (Cloudflare API calls and a real health probe), each need marked must/should. No code change. Version provisional; the PM allocates.
+
 ## [0.0.20] - 2026-10-30
 
 - Docs: `docs/TLS-NEED-LIST.md`, the need list for HTTPAnt (who terminates, certificate source, SNI, ALPN, renewal without restart, what HTTPAnt reports), each need marked must/should. HTTPAnt gets a certificate hole, not a TLS stack. No code change. Version provisional; the PM allocates.
