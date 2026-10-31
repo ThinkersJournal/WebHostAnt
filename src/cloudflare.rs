@@ -205,7 +205,9 @@ fn secret_list_args(app_id: &str) -> Vec<String> {
     strings(&["secret", "list", "--name", app_id, "--format", "json"])
 }
 
-fn secret_put_args(name: &str, app_id: &str) -> Vec<String> {
+/// Arguments of `wrangler secret put`: the secret's NAME only. The value never goes in an argument; it travels on stdin
+/// (`Call::stdin`), so nothing built here can leak it.
+fn secret_name_put_args(name: &str, app_id: &str) -> Vec<String> {
     strings(&["secret", "put", name, "--name", app_id])
 }
 
@@ -413,7 +415,7 @@ impl<R: Runner> Target for CloudflareTarget<R> {
                 let value = secret
                     .ok_or_else(|| Error::Target("no value supplied for a secret".to_string()))?;
                 let call = Call {
-                    args: secret_put_args(name, app_id),
+                    args: secret_name_put_args(name, app_id),
                     stdin: Some(value.clone()),
                 };
                 ("secret put".to_string(), self.runner.run(&call)?)
@@ -815,19 +817,26 @@ compatibility_date = \"2025-01-01\"
 
     #[test]
     fn real_wrangler_accepts_the_arguments_of_every_read_and_secret_call() {
-        for args in [
-            deployments_list_args("some-app"),
-            versions_view_args("0000-version", "some-app"),
-            secret_list_args("some-app"),
-            secret_put_args("SOME_NAME", "some-app"),
+        // Messages name the call by a fixed label, never by its arguments.
+        for (label, args) in [
+            ("deployments list", deployments_list_args("some-app")),
+            (
+                "versions view",
+                versions_view_args("0000-version", "some-app"),
+            ),
+            ("secret list", secret_list_args("some-app")),
+            ("secret put", secret_name_put_args("SOME_NAME", "some-app")),
         ] {
             let text = without_credentials(&args);
             assert!(
                 text.contains("non-interactive environment"),
-                "{args:?} never got past argument checking: {text}"
+                "`wrangler {label}` never got past argument checking"
             );
             for bad in NOT_PARSED {
-                assert!(!text.contains(bad), "{args:?}: {text}");
+                assert!(
+                    !text.contains(bad),
+                    "`wrangler {label}` was refused with: {bad}"
+                );
             }
         }
     }
