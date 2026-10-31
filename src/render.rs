@@ -89,6 +89,15 @@ impl DeployStatus {
     }
 }
 
+/// A service just created, with the deploy Render started for it if the answer names one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Created {
+    /// The new service.
+    pub service: Service,
+    /// The first deploy's id, if the answer carries one.
+    pub deploy_id: Option<String>,
+}
+
 /// A deploy Render reports.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Deploy {
@@ -121,6 +130,11 @@ impl<R: Rest> RenderApi<R> {
         let owner_id = owner_id.into();
         plain_id("workspace id", &owner_id)?;
         Ok(Self { rest, owner_id })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn rest_for_test(&self) -> &R {
+        &self.rest
     }
 
     /// Send; a non-2xx status is an error carrying Render's `message` and `code` and never the request. Returns the parsed body (`Null` if empty).
@@ -229,7 +243,7 @@ impl<R: Rest> RenderApi<R> {
         plan: &str,
         health_path: &str,
         settings: &BTreeMap<String, String>,
-    ) -> Result<Service, Error> {
+    ) -> Result<Created, Error> {
         if !WEB_SERVICE_PLANS.contains(&plan) {
             return Err(Error::Target(format!(
                 "'{plan}' is not a plan Render lists for a web service"
@@ -262,7 +276,14 @@ impl<R: Rest> RenderApi<R> {
                 "Render created something other than what was asked".to_string(),
             ));
         }
-        Ok(created)
+        let deploy_id = body
+            .get("deployId")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        Ok(Created {
+            service: created,
+            deploy_id,
+        })
     }
 
     /// The service's variables. A full page is refused.
@@ -442,7 +463,7 @@ impl<R: Rest> RenderApi<R> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::cloudflare_domains::RestAnswer;
     use std::cell::RefCell;
@@ -606,7 +627,9 @@ mod tests {
                 &settings(),
             )
             .unwrap();
-        assert_eq!(made.name, "my-app");
+        assert_eq!(made.service.name, "my-app");
+        assert_eq!(made.deploy_id.as_deref(), Some("dep-1"));
+        let made = made.service;
         assert_eq!(a.find_service("my-app").unwrap().unwrap().id, made.id);
         assert_eq!(
             a.env_vars(&made.id).unwrap()["APP_BASE_URL"],
