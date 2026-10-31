@@ -4,6 +4,9 @@
 //! So every operation reports [`Support::Unverified`] until the caller opts in with [`RenderTarget::trust_operations`]. `Restore` and `ReadTls` are
 //! `No` in this slice.
 //!
+//! **Loud limitation: [`SECRET_LIMITATION`].** On Render a secret is an ordinary environment variable that the API may show to any holder of the
+//! API key; use a dedicated workspace and key.
+//!
 //! Choices a reader should know:
 //!
 //! * **Ours.** A service is ours when its variable `WEBHOSTANT_APP` equals the app id ([`MARKER`]).
@@ -21,6 +24,9 @@ use crate::cloudflare::MARKER;
 use crate::cloudflare_domains::Rest;
 use crate::render::{DeployStatus, RenderApi};
 use crate::{Error, Observed, Op, Presence, SecretValue, Step, Support, Target};
+
+/// What anyone using this adapter for secrets must be told. [`RenderTarget::help`] returns it.
+pub const SECRET_LIMITATION: &str = "on Render a secret is an ordinary environment variable that the API may show to any holder of the API key; use a dedicated workspace and key";
 
 /// The variable that lists the names (comma-separated) of the variables that are secrets.
 pub const SECRETS_MARKER: &str = "WEBHOSTANT_SECRETS";
@@ -122,6 +128,13 @@ impl<R: Rest> RenderTarget<R> {
         self
     }
 
+    /// Plain-language help for a person choosing or running this adapter: what it needs and the secret limitation.
+    pub fn help(&self) -> String {
+        format!(
+            "Render (web service from a container image). Needs a Render API key and workspace id. Limitation: {SECRET_LIMITATION}."
+        )
+    }
+
     fn note(&self, line: &str) {
         self.log.borrow_mut().push(line.to_string());
     }
@@ -163,6 +176,18 @@ impl<R: Rest> RenderTarget<R> {
     fn redeploy(&self, service_id: &str) -> Result<(), Error> {
         let started = self.api.trigger_deploy(service_id, None)?;
         self.wait_live(service_id, &started.id)
+    }
+}
+
+impl<R: Rest> std::fmt::Debug for RenderTarget<R> {
+    /// Names the adapter and its non-secret settings; never a variable, a secret or the API key.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderTarget")
+            .field("image_path", &self.image_path)
+            .field("plan", &self.plan)
+            .field("health_path", &self.health_path)
+            .field("trusted", &self.trusted)
+            .finish_non_exhaustive()
     }
 }
 
@@ -590,6 +615,23 @@ mod tests {
             .collect();
         assert_eq!(sent.len(), 1);
         assert!(sent[0].query.is_empty() && !sent[0].path.contains("canary"));
+    }
+
+    #[test]
+    fn the_target_s_debug_and_help_carry_no_value_and_state_the_limitation() {
+        let mut t = deployed();
+        t.apply_step(
+            "my-app",
+            &Step::SetSecret {
+                name: "API_TOKEN".into(),
+            },
+            Some(&SecretValue::new("canary-secret-42")),
+        )
+        .unwrap();
+        let shown = format!("{t:?} {} {}", t.help(), t.diagnostics());
+        assert!(!shown.contains("canary-secret-42") && !shown.contains("API_TOKEN"));
+        assert!(t.help().contains("use a dedicated workspace and key"));
+        assert!(t.help().contains("ordinary environment variable"));
     }
 
     #[test]

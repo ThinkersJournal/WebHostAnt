@@ -124,6 +124,15 @@ pub struct RenderApi<R: Rest> {
     owner_id: String,
 }
 
+impl<R: Rest> std::fmt::Debug for RenderApi<R> {
+    /// The workspace id only; the transport (which holds the API key) is not shown.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderApi")
+            .field("owner_id", &self.owner_id)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<R: Rest> RenderApi<R> {
     /// `owner_id` is the workspace id (`tea-...` or `usr-...`); it must be a plain id.
     pub fn new(rest: R, owner_id: impl Into<String>) -> Result<Self, Error> {
