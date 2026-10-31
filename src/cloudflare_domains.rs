@@ -10,7 +10,7 @@ use httpant_client::Client;
 use httpant_client::core::http::Method as HttpMethod;
 use serde_json::{Value, json};
 
-use crate::{Error, SecretValue};
+use crate::{Error, Renewal, SecretValue, TlsStatus};
 
 /// The REST verbs this module uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,6 +66,92 @@ pub struct Domain {
     pub hostname: String,
     /// The Worker it points at.
     pub service: String,
+}
+
+/// A certificate pack Cloudflare holds for the zone. Only the fields this crate uses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CertPack {
+    /// The pack's status word (`active`, `pending_validation`, `validation_timed_out`, ...).
+    pub status: String,
+    /// Host names the pack covers (may include `*.` wildcards).
+    pub hosts: Vec<String>,
+    /// The authority selected for the order, if stated.
+    pub authority: Option<String>,
+    /// `(expires_on, issuer)` for each certificate in the pack.
+    pub certificates: Vec<(Option<String>, Option<String>)>,
+    /// Whether the authority has reported validation errors.
+    pub has_validation_errors: bool,
+}
+
+impl CertPack {
+    fn covers(&self, name: &str) -> bool {
+        let name = name.to_ascii_lowercase();
+        self.hosts.iter().any(|h| {
+            let h = h.to_ascii_lowercase();
+            h == name
+                || h.strip_prefix("*.").is_some_and(|suffix| {
+                    name.strip_suffix(suffix)
+                        .and_then(|front| front.strip_suffix('.'))
+                        .is_some_and(|label| !label.is_empty() && !label.contains('.'))
+                })
+        })
+    }
+
+    fn timed_out(&self) -> bool {
+        self.status.ends_with("_timed_out")
+    }
+}
+
+/// What the zone's packs say about `names`: the soonest expiry among the active packs that cover them, who issued, and whether a covering pack is stuck.
+/// A name no active pack covers is simply absent from the answer (right after a bind that is normal); the renewal is `Unknown` unless a pack says it failed.
+pub fn tls_findings(names: &[String], packs: &[CertPack]) -> TlsStatus {
+    let covering: Vec<&CertPack> = packs
+        .iter()
+        .filter(|p| names.iter().any(|n| p.covers(n)))
+        .collect();
+    let active: Vec<&&CertPack> = covering.iter().filter(|p| p.status == "active").collect();
+    // RFC 3339 in UTC with a trailing Z compares correctly as text; any other form is not compared, so no expiry is claimed.
+    let dates: Vec<&str> = active
+        .iter()
+        .flat_map(|p| p.certificates.iter().filter_map(|c| c.0.as_deref()))
+        .collect();
+    let comparable = !dates.is_empty()
+        && dates
+            .iter()
+            .all(|d| d.ends_with('Z') && d.len() == dates[0].len());
+    let not_after = if comparable {
+        dates.iter().min().map(|d| d.to_string())
+    } else {
+        None
+    };
+    let mut issuers: Vec<String> = active
+        .iter()
+        .flat_map(|p| {
+            p.certificates
+                .iter()
+                .filter_map(|c| c.1.clone())
+                .chain(p.authority.clone())
+        })
+        .collect();
+    issuers.sort();
+    issuers.dedup();
+    let last_renewal = match covering
+        .iter()
+        .find(|p| p.timed_out() || p.has_validation_errors)
+    {
+        Some(p) => Renewal::Failed(format!("the certificate pack is {}", p.status)),
+        None => Renewal::Unknown,
+    };
+    TlsStatus {
+        names: names.to_vec(),
+        not_after,
+        issuer: if issuers.is_empty() {
+            None
+        } else {
+            Some(issuers.join(", "))
+        },
+        last_renewal,
+    }
 }
 
 /// An id that goes into a URL path must be plain, or it could add path segments.
@@ -231,6 +317,67 @@ impl<R: Rest> Domains<R> {
         Ok(got)
     }
 
+    /// The zone's certificate packs (`GET /zones/{zone_id}/ssl/certificate_packs`). Refuses an answer that says it has more pages.
+    pub fn certificate_packs(&self) -> Result<Vec<CertPack>, Error> {
+        let parsed = self.call(RestCall {
+            method: Method::Get,
+            path: format!("/zones/{}/ssl/certificate_packs", self.zone_id),
+            query: Vec::new(),
+            body: None,
+        })?;
+        if parsed
+            .get("result_info")
+            .and_then(|i| i.get("total_pages"))
+            .and_then(Value::as_u64)
+            .is_some_and(|p| p > 1)
+        {
+            return Err(Error::Target(
+                "Cloudflare reports more than one page of certificate packs; reading only the first would hide some"
+                    .to_string(),
+            ));
+        }
+        let items = parsed
+            .get("result")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                Error::Target("the certificate pack list has no result array".to_string())
+            })?;
+        let text = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_string);
+        items
+            .iter()
+            .map(|p| {
+                let status = text(p, "status")
+                    .ok_or_else(|| Error::Target("a certificate pack has no status".to_string()))?;
+                Ok(CertPack {
+                    status,
+                    hosts: p
+                        .get("hosts")
+                        .and_then(Value::as_array)
+                        .map(|h| {
+                            h.iter()
+                                .filter_map(|x| x.as_str().map(str::to_string))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    authority: text(p, "certificate_authority"),
+                    certificates: p
+                        .get("certificates")
+                        .and_then(Value::as_array)
+                        .map(|c| {
+                            c.iter()
+                                .map(|x| (text(x, "expires_on"), text(x, "issuer")))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    has_validation_errors: p
+                        .get("validation_errors")
+                        .and_then(Value::as_array)
+                        .is_some_and(|e| !e.is_empty()),
+                })
+            })
+            .collect()
+    }
+
     /// Remove a binding by its Cloudflare id.
     pub fn detach(&self, domain_id: &str) -> Result<(), Error> {
         plain_id("domain id", domain_id)?;
@@ -372,6 +519,13 @@ pub(crate) mod tests {
                 return Ok(a);
             }
             let ok = |body: String| Ok(RestAnswer { status: 200, body });
+            if call.path.ends_with("/ssl/certificate_packs") {
+                return ok(envelope(json!([{
+                    "id": "p1", "status": "active", "type": "universal", "hosts": ["example.org", "*.example.org"],
+                    "certificate_authority": "lets_encrypt", "validation_errors": [],
+                    "certificates": [{"id": "c1", "expires_on": "2027-02-01T00:00:00Z", "issuer": "Lets Encrypt", "hosts": ["example.org"], "status": "active"}]
+                }])));
+            }
             match call.method {
                 Method::Get => {
                     let want = |k: &str| {
@@ -542,6 +696,137 @@ pub(crate) mod tests {
         }
         let d = Domains::new(Liar(FakeRest::default()), "acct1", "zone1").unwrap();
         assert!(d.attach("app.example.org", "my-app").is_err());
+    }
+
+    fn pack(status: &str, hosts: &[&str], expires: &[&str]) -> CertPack {
+        CertPack {
+            status: status.into(),
+            hosts: hosts.iter().map(|h| h.to_string()).collect(),
+            authority: Some("lets_encrypt".into()),
+            certificates: expires
+                .iter()
+                .map(|e| (Some(e.to_string()), Some("Lets Encrypt".into())))
+                .collect(),
+            has_validation_errors: false,
+        }
+    }
+
+    fn names(n: &[&str]) -> Vec<String> {
+        n.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn the_soonest_expiry_of_the_active_covering_packs_is_reported() {
+        let packs = [
+            pack(
+                "active",
+                &["example.org", "*.example.org"],
+                &["2027-03-01T00:00:00Z", "2027-02-01T00:00:00Z"],
+            ),
+            // Does not cover the name: must not count.
+            pack("active", &["other.net"], &["2026-11-01T00:00:00Z"]),
+        ];
+        let s = tls_findings(&names(&["app.example.org"]), &packs);
+        assert_eq!(s.not_after.as_deref(), Some("2027-02-01T00:00:00Z"));
+        assert!(s.issuer.as_deref().unwrap().contains("Lets Encrypt"));
+        assert_eq!(s.last_renewal, Renewal::Unknown);
+    }
+
+    #[test]
+    fn a_wildcard_covers_one_label_only() {
+        let packs = [pack(
+            "active",
+            &["*.example.org"],
+            &["2027-01-01T00:00:00Z"],
+        )];
+        assert!(
+            tls_findings(&names(&["a.example.org"]), &packs)
+                .not_after
+                .is_some()
+        );
+        assert!(
+            tls_findings(&names(&["a.b.example.org"]), &packs)
+                .not_after
+                .is_none()
+        );
+        assert!(
+            tls_findings(&names(&["example.org"]), &packs)
+                .not_after
+                .is_none()
+        );
+        assert!(
+            tls_findings(&names(&["evilexample.org"]), &packs)
+                .not_after
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_pending_pack_claims_no_expiry_and_a_timed_out_one_is_a_failed_renewal() {
+        let pending = [pack(
+            "pending_validation",
+            &["app.example.org"],
+            &["2027-01-01T00:00:00Z"],
+        )];
+        let s = tls_findings(&names(&["app.example.org"]), &pending);
+        assert_eq!(s.not_after, None);
+        assert_eq!(s.last_renewal, Renewal::Unknown);
+        let stuck = [pack("validation_timed_out", &["app.example.org"], &[])];
+        assert!(matches!(
+            tls_findings(&names(&["app.example.org"]), &stuck).last_renewal,
+            Renewal::Failed(_)
+        ));
+    }
+
+    #[test]
+    fn dates_in_a_form_that_cannot_be_compared_claim_no_expiry() {
+        let packs = [pack(
+            "active",
+            &["app.example.org"],
+            &["2027-01-01T00:00:00+02:00", "2027-01-01T00:00:00Z"],
+        )];
+        assert_eq!(
+            tls_findings(&names(&["app.example.org"]), &packs).not_after,
+            None
+        );
+    }
+
+    #[test]
+    fn certificate_packs_are_parsed_from_the_documented_shape() {
+        let f = FakeRest::default();
+        *f.force.borrow_mut() = Some(RestAnswer {
+            status: 200,
+            body: envelope(json!([{
+                "id": "p1", "status": "active", "type": "universal",
+                "hosts": ["example.org", "*.example.org"], "certificate_authority": "lets_encrypt",
+                "validation_errors": [],
+                "certificates": [{"id": "c1", "expires_on": "2027-02-01T00:00:00Z", "issuer": "Lets Encrypt", "hosts": ["example.org"], "status": "active"}]
+            }])),
+        });
+        let packs = domains(f).certificate_packs().unwrap();
+        assert_eq!(packs.len(), 1);
+        assert_eq!(packs[0].status, "active");
+        assert_eq!(
+            packs[0].certificates[0].0.as_deref(),
+            Some("2027-02-01T00:00:00Z")
+        );
+        assert!(!packs[0].has_validation_errors);
+    }
+
+    #[test]
+    fn certificate_pack_errors_and_extra_pages_are_refused() {
+        let f = FakeRest::default();
+        *f.force.borrow_mut() = Some(RestAnswer {
+            status: 403,
+            body: DENIED.into(),
+        });
+        assert!(domains(f).certificate_packs().is_err());
+        let f = FakeRest::default();
+        *f.force.borrow_mut() = Some(RestAnswer {
+            status: 200,
+            body: json!({"success": true, "errors": [], "messages": [], "result": [], "result_info": {"total_pages": 3}}).to_string(),
+        });
+        assert!(domains(f).certificate_packs().is_err());
     }
 
     #[test]

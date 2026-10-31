@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use crate::cloudflare_domains::{Domains, Rest};
-use crate::{Error, Observed, Op, Presence, SecretValue, Step, Support, Target};
+use crate::cloudflare_domains::{Domains, Rest, tls_findings};
+use crate::{Error, Observed, Op, Presence, SecretValue, Step, Support, Target, TlsStatus};
 
 /// The plain setting that marks a Worker as deployed by WebHostAnt for this app id. A Worker without it is never ours.
 pub const MARKER: &str = "WEBHOSTANT_APP";
@@ -372,7 +372,9 @@ impl<R: Runner> Target for CloudflareTarget<R> {
     fn supports(&self, op: Op) -> Support {
         // No previous-version handle is read yet, so this adapter cannot put an app back (docs/ROLLBACK-DESIGN.md).
         // Domain binding needs the REST API configured (`with_domains`); without it never claim it.
-        if op == Op::Restore || (op == Op::BindDomain && self.domains.is_none()) {
+        if op == Op::Restore
+            || (matches!(op, Op::BindDomain | Op::ReadTls) && self.domains.is_none())
+        {
             Support::No
         } else if self.trusted.contains(&op) {
             Support::Yes
@@ -456,6 +458,27 @@ impl<R: Runner> Target for CloudflareTarget<R> {
                 .push(format!("{call_text} failed: {msg}"));
             Err(Error::Target(format!("{call_text} failed: {msg}")))
         }
+    }
+
+    fn tls_status(&self, app_id: &str) -> Result<TlsStatus, Error> {
+        let Some(domains) = &self.domains else {
+            return Err(Error::Unsupported {
+                target: "cloudflare".to_string(),
+                op: Op::ReadTls,
+            });
+        };
+        // Ask the Worker side first: an unreachable or foreign host must not be answered for from the zone side alone.
+        if self.locate(app_id)? != Presence::Ours {
+            return Err(Error::Target(
+                "the app is not ours or not deployed".to_string(),
+            ));
+        }
+        let names: Vec<String> = domains
+            .list(Some(app_id), None)?
+            .into_iter()
+            .map(|d| d.hostname)
+            .collect();
+        Ok(tls_findings(&names, &domains.certificate_packs()?))
     }
 
     fn diagnostics(&self) -> String {
@@ -620,7 +643,13 @@ mod tests {
         use crate::cloudflare_domains::{Domains, Rest, tests::FakeRest};
         let rest: Box<dyn Rest> = Box::new(FakeRest::default());
         let ops: &[Op] = if trust_bind {
-            &[Op::Create, Op::SetSetting, Op::SetSecret, Op::BindDomain]
+            &[
+                Op::Create,
+                Op::SetSetting,
+                Op::SetSecret,
+                Op::BindDomain,
+                Op::ReadTls,
+            ]
         } else {
             &[Op::Create, Op::SetSetting, Op::SetSecret]
         };
