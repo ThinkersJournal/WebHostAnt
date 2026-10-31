@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.23] - 2026-10-31
+
+- Cloudflare dry-run row 2: the arguments of every other `wrangler` call the adapter makes (`deployments list`, `versions view`, `secret list`, `secret put`; now built by small functions the code and the test share) are checked by the **real** wrangler 4.141.0 with no credentials, an empty config directory and `CI=1`: it parses its arguments and stops at "set a CLOUDFLARE_API_TOKEN" before any network call, so it cannot reach a real account. Mutation (`--format` misspelled) fails it with wrangler's "Unknown argument"; a positive-control test shows an unknown flag is reported. This proves the flags exist, not what Cloudflare answers (output shapes stay UNVERIFIED until D6). The test names each call by a fixed label and never prints its arguments (CodeQL cleartext-logging alerts); `secret_put_args` is now `secret_name_put_args`: it carries the secret's NAME only, the value goes on stdin. No public API change. Version provisional; the PM allocates.
+
 ## [0.0.22] - 2026-10-31
 
 - First Cloudflare dry-run row: a test runs the **real** `wrangler deploy --dry-run` with the exact arguments the adapter sends (`deploy_args`, split out of `deploy`), which builds the Worker and exits before any upload, so it needs no account. It proves wrangler 4.141.0 accepts `--cwd`, `--name`, `--keep-vars` and `--var`, and that variable values are not echoed. Mutation (a misspelled flag) fails it with wrangler's own "Unknown arguments"; a second test shows the dry run can fail. CI installs `wrangler@4.141.0`. Does not verify anything on Cloudflare's side (D6). No public API change. Version provisional; the PM allocates.
