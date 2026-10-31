@@ -10,6 +10,8 @@ mod target;
 
 pub mod cloudflare;
 pub mod cloudflare_domains;
+#[cfg(feature = "configurant")]
+pub mod configurant_source;
 pub mod conformance;
 pub mod fake;
 
