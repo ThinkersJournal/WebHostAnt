@@ -15,6 +15,7 @@ pub mod configurant_source;
 pub mod conformance;
 pub mod fake;
 pub mod render;
+pub mod render_target;
 
 pub use error::Error;
 pub use host::{

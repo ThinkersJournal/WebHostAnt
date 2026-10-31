@@ -66,3 +66,9 @@ Not included: a Render account and token for real tests (a decision for CireSnav
 * DigitalOcean: certificates for an ordinary domain, rollback and create bodies, any data export.
 * Fly: what registries it pulls, whether secrets read back, downloads of snapshots and backups.
 * All three: rate limits, and the error a host returns when a name is already taken by someone else (needed for the "never overwrite" rule, as with Cloudflare).
+
+## Known limitation to tell every user (PM ruling 2026-10-31)
+
+On Render a secret is an ordinary environment variable that the API may show to any holder of the API key; use a dedicated workspace and key. WebHostAnt
+names such variables in a marker (`WEBHOSTANT_SECRETS`), reports them by name only and never logs a value, but it cannot stop Render's API from showing one.
+The adapter's `help()` says this too.
