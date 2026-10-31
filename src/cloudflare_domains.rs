@@ -19,6 +19,8 @@ pub enum Method {
     Get,
     /// Create or replace.
     Put,
+    /// Create.
+    Post,
     /// Remove.
     Delete,
 }
@@ -155,7 +157,7 @@ pub fn tls_findings(names: &[String], packs: &[CertPack]) -> TlsStatus {
 }
 
 /// An id that goes into a URL path must be plain, or it could add path segments.
-fn plain_id(what: &str, id: &str) -> Result<(), Error> {
+pub(crate) fn plain_id(what: &str, id: &str) -> Result<(), Error> {
     if !id.is_empty()
         && id
             .bytes()
@@ -466,6 +468,7 @@ impl Rest for HttpRest {
         let method = match call.method {
             Method::Get => HttpMethod::GET,
             Method::Put => HttpMethod::PUT,
+            Method::Post => HttpMethod::POST,
             Method::Delete => HttpMethod::DELETE,
         };
         let mut request = client
@@ -561,6 +564,7 @@ pub(crate) mod tests {
                         .push((id.clone(), h.clone(), s.clone()));
                     ok(envelope(dom(&id, &h, &s)))
                 }
+                Method::Post => panic!("the fake Cloudflare takes no POST"),
                 Method::Delete => {
                     let id = call.path.rsplit('/').next().unwrap().to_string();
                     self.domains.borrow_mut().retain(|(i, _, _)| *i != id);

@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.30] - 2026-10-31
+
+- Render adapter, slice 1 of about five (module `render`; recommended in `docs/SECOND-HOST.md`): `RenderApi` over the existing `Rest` trait for the calls the adapter will make: find a service by exact name and workspace, create a web service that runs a container image (plan checked against the schema's list before any call), read and set variables and secret files, list and add custom domains (with `verified` from `verificationStatus`), trigger and read deploys (status words classified; an unknown word is never live), and roll back. Shapes are from Render's published OpenAPI file, **not** a live answer (no Render account yet); tests use a fake that answers in them. Not yet a `Target`. Seven mutations (substring name match, other workspace, unknown status as live, plan unchecked, domain answer for another name, deploy answer for another deploy, full page trusted) each fail a test. A secret value never appears in an error. `cloudflare_domains::Method` gains `Post` and its `plain_id` is shared. Version provisional; the PM allocates.
+
 ## [0.0.29] - 2026-10-31
 
 - Docs: `docs/SECOND-HOST.md`, Render, DigitalOcean App Platform and Fly.io read against DESIGN 3.1's six criteria from their published OpenAPI files and documentation pages, each cell naming what was read and marking the rest UNVERIFIED. Recommends Render, with the build cost (about five PRs) and what could not be read. Also commits the rewritten `HANDOFF.md`. No code change. Version provisional; the PM allocates.
