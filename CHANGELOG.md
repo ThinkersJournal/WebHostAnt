@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.25] - 2026-10-31
+
+- Docs: the Workers custom-domains REST calls (list, get, attach, detach) read from Cloudflare's published OpenAPI schema into `docs/CLOUDFLARE-FACTS.md`, with what the schema does not say (idempotence, the code for a hostname held by another Worker, certificate expiry); this replaces "endpoint path not read". New `docs/RELEASE-CHECKLIST.md`: the by-hand check before a release that touches the Cloudflare adapter, until the D6 test account exists. No code change. Version provisional; the PM allocates.
+
 ## [0.0.24] - 2026-10-31
 
 - Real health probe (`HealthProbe`, `Health`), built on the published `httpant-client` 0.5.22: one `GET` of the app's health path; `200` is healthy, any other status is reported as itself, and redirects are never followed (a `302` to a login page is `Status(302)`, not healthy). The private-address guard (`refuse_private_addresses`) is on by default and plain `http` is refused with it; `allow_private(true)` opts in for local development. `HealthProbe::into_probe` gives the closure `CloudflareTarget::new` takes. Mutations (guard off; `3xx` counted healthy) fail tests; a positive control shows the same server is healthy once opted in. Adds dependencies `httpant-client` (https) and `tokio` (rt). Not yet wired into a default; the consumer chooses the URL. Version provisional; the PM allocates.
