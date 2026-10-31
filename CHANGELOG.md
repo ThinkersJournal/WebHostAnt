@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.29] - 2026-10-31
+
+- Docs: `docs/SECOND-HOST.md`, Render, DigitalOcean App Platform and Fly.io read against DESIGN 3.1's six criteria from their published OpenAPI files and documentation pages, each cell naming what was read and marking the rest UNVERIFIED. Recommends Render, with the build cost (about five PRs) and what could not be read. Also commits the rewritten `HANDOFF.md`. No code change. Version provisional; the PM allocates.
+
 ## [0.0.28] - 2026-10-31
 
 - ConfigurAnt integration, first slice (cargo feature `configurant`, module `configurant_source`, on ConfigurAnt 0.5.43): `project_settings` renders an app's declared plain settings from a resolved ConfigurAnt configuration into the `Config` that planning takes (found by the schema value's `env` name, else its `key`; unset values are left out so planning reports them missing), and `secret_sources` returns the schema's `source` reference for each of the app's secrets, naming a secret without ever reading its value. A value the schema marks `secret` can never be projected as a plain setting, and a manifest secret the schema does not mark secret is refused; neither error shows a value. This is DESIGN 6.3 item 1 (projection) and needs nothing new from ConfigurAnt. Mutations (secret check removed in either direction; the source reference replaced by the value) fail tests; an end-to-end test plans and applies with projected settings. CI now builds, lints, tests and documents with `--all-features`. Version provisional; the PM allocates.
