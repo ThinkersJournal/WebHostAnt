@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.24] - 2026-10-31
+
+- Real health probe (`HealthProbe`, `Health`), built on the published `httpant-client` 0.5.22: one `GET` of the app's health path; `200` is healthy, any other status is reported as itself, and redirects are never followed (a `302` to a login page is `Status(302)`, not healthy). The private-address guard (`refuse_private_addresses`) is on by default and plain `http` is refused with it; `allow_private(true)` opts in for local development. `HealthProbe::into_probe` gives the closure `CloudflareTarget::new` takes. Mutations (guard off; `3xx` counted healthy) fail tests; a positive control shows the same server is healthy once opted in. Adds dependencies `httpant-client` (https) and `tokio` (rt). Not yet wired into a default; the consumer chooses the URL. Version provisional; the PM allocates.
+
 ## [0.0.23] - 2026-10-31
 
 - Cloudflare dry-run row 2: the arguments of every other `wrangler` call the adapter makes (`deployments list`, `versions view`, `secret list`, `secret put`; now built by small functions the code and the test share) are checked by the **real** wrangler 4.141.0 with no credentials, an empty config directory and `CI=1`: it parses its arguments and stops at "set a CLOUDFLARE_API_TOKEN" before any network call, so it cannot reach a real account. Mutation (`--format` misspelled) fails it with wrangler's "Unknown argument"; a positive-control test shows an unknown flag is reported. This proves the flags exist, not what Cloudflare answers (output shapes stay UNVERIFIED until D6). The test names each call by a fixed label and never prints its arguments (CodeQL cleartext-logging alerts); `secret_put_args` is now `secret_name_put_args`: it carries the secret's NAME only, the value goes on stdin. No public API change. Version provisional; the PM allocates.

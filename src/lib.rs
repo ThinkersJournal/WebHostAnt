@@ -5,6 +5,7 @@
 mod error;
 mod host;
 mod manifest;
+mod probe;
 mod target;
 
 pub mod cloudflare;
@@ -16,4 +17,5 @@ pub use host::{
     Applied, DataAfterRollback, Host, Plan, ReadBack, Release, Rollback, RollbackPoint, StepOutcome,
 };
 pub use manifest::{AppManifest, Config, MapSecrets, Migrations, SecretValue, Secrets};
+pub use probe::{Health, HealthProbe};
 pub use target::{Observed, Op, Presence, Renewal, Snapshot, Step, Support, Target, TlsStatus};
