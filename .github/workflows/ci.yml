@@ -29,6 +29,9 @@ jobs:
           toolchain: stable
           components: clippy, rustfmt
 
+      - name: Install wrangler (the dry-run tests run the real one)
+        run: npm install --global wrangler@4.141.0
+
       - name: cargo fmt --check
         run: cargo fmt --all --check
 

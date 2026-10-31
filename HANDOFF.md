@@ -33,14 +33,10 @@ Ant-first rule: do not hand-roll config loading, secrets, redaction, audit, HTTP
 exist (all other Ants are 0.0.0 placeholders: stub behind a trait and say so). One PR at a time, red-first, version bump every PR (placeholders:
 PM allocates at gate). Memory rule: CARGO_BUILD_JOBS=2, one build at a time. Repos: ThinkersJournal/WebHostAnt, crate `webhostant` 0.0.0 published.
 
-## FIRST ON NEXT START (PM [TASK] SOAK WAVE 1, 2026-10-30; CireSnave: all lanes join Synapse for a 3-day side-by-side soak, claude-peers stays)
-You are relaunched onto BOTH channels. (1) ToolSearch "synapse" must find tools; if not, say so. (2) Send the PM "soak webhostant #1" on synapse.
-(3) Reply on whichever channel a message arrived on. Then resume the State below (idle; nothing unblocked).
-
-## State
-main = da42863 (0.0.19, PR #18 merged 2026-10-30; worktrees and branches cleaned). No open PR. Nothing unpushed.
-No unblocked roadmap row: everything waits on CireSnave (D6/D7/D8) or HTTPAnt/WebServAnt. Check origin/main and claude-peers for new tasks.
-Cloudflare `BindDomain`/`ReadTls`: PM ruled DEFERRED until the D6 test account exists and HTTPAnt can carry REST (wrangler has no domain bind/list command: docs/CLOUDFLARE-FACTS.md).
-TASK 2 (blocked on CireSnave D6 test account): run the suite against real wrangler and verify the UNVERIFIED output shapes in `cloudflare.rs`. Real HTTP health probe waits for HTTPAnt. Open for CireSnave: D6, D7 ConfigurAnt additions, D8 ReleaseAnt. Unbind: PM ruled wait-for-consumer (2026-10-30). PM wakes this lane when HTTPAnt/WebServAnt unblock a row. Idea not asked: log "pushed N secrets" (count) if the PM wants it.
+## State (2026-10-31)
+main = d7404e9 (0.0.21). Open PR: dry-run deploy test (0.0.22 provisional). Synapse: my session was dropped by the 2026-10-30 restart; the PM said do NOT re-claim (the Synapse lane diagnoses); use claude-peers.
+HTTPAnt 0.5.19 is published: server TLS (CertSource, SNI, h2, trusted proxy, cert read-back) is ready, but that feeds WebServAnt (still 0.0.0), so local serving/TLS waits. Client TLS (https) is NOT there: the PM asked httpant for it as a row; my need note is `docs/HTTPS-CLIENT-NEEDS.md` (merged); I depend only on a published version. Cloudflare `BindDomain`/`ReadTls` (REST) and a real health probe wait for it. Need list sent earlier: `docs/TLS-NEED-LIST.md`.
+PM [FIX] 2026-10-31: go on the Cloudflare dry-run rows, one at a time, version at gate. Row 1 = real `wrangler deploy --dry-run` with the adapter's own args (needs no account; CI installs wrangler 4.141.0). Candidate next rows, same method: other wrangler calls that work offline (check `--help` for `--dry-run`/`--outdir`); parse-shape checks stay UNVERIFIED until D6.
+Still waiting on CireSnave: D6 test account (TASK 2: run the suite against real wrangler, verify UNVERIFIED shapes in `cloudflare.rs`), D7 ConfigurAnt additions, D8 ReleaseAnt. Unbind: wait-for-consumer. Idea not asked: log "pushed N secrets" (count).
 Rulings: Cloudflare only first; secrets pushed (paste fallback); presence = host API then authenticated config retrieval, no unauthenticated tier; local serving waits for WebServAnt (waits for HTTPAnt). See ROADMAP.md, docs/CONSUMER-CONTRACT.md.
-Gotchas: files are CRLF-in-worktree/LF-in-blob; scripted replaces must assert count==1. Commit this HANDOFF.md edit in the next PR; use a worktree, never switch the primary.
+Gotchas: files are CRLF-in-worktree/LF-in-blob; scripted replaces must assert count==1. Use a worktree, never switch the primary. On Windows `wrangler` is a `.cmd` shim (ProcessRunner goes through `cmd /C`).

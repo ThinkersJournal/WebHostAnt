@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.22] - 2026-10-31
+
+- First Cloudflare dry-run row: a test runs the **real** `wrangler deploy --dry-run` with the exact arguments the adapter sends (`deploy_args`, split out of `deploy`), which builds the Worker and exits before any upload, so it needs no account. It proves wrangler 4.141.0 accepts `--cwd`, `--name`, `--keep-vars` and `--var`, and that variable values are not echoed. Mutation (a misspelled flag) fails it with wrangler's own "Unknown arguments"; a second test shows the dry run can fail. CI installs `wrangler@4.141.0`. Does not verify anything on Cloudflare's side (D6). No public API change. Version provisional; the PM allocates.
+
 ## [0.0.21] - 2026-10-31
 
 - Docs: `docs/HTTPS-CLIENT-NEEDS.md`, what WebHostAnt needs from the HTTPAnt client for https (Cloudflare API calls and a real health probe), each need marked must/should. No code change. Version provisional; the PM allocates.
