@@ -1,6 +1,6 @@
 [package]
 name = "webhostant"
-version = "0.0.21"
+version = "0.0.22"
 edition = "2024"
 description = "Deploy a web app to a host and prove it is there: plan, apply, read back, with a conformance suite for host adapters. Early: Cloudflare adapter exists but is unverified against a real account."
 license = "MIT OR Apache-2.0"

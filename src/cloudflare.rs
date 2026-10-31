@@ -303,6 +303,11 @@ impl<R: Runner> CloudflareTarget<R> {
     }
 
     fn deploy(&self, app_id: &str, extra_vars: &[(&str, &str)]) -> Result<Output, Error> {
+        let args = self.deploy_args(app_id, extra_vars);
+        self.runner.run(&Call { args, stdin: None })
+    }
+
+    fn deploy_args(&self, app_id: &str, extra_vars: &[(&str, &str)]) -> Vec<String> {
         let dir = self.project_dir.to_string_lossy().into_owned();
         let marker = format!("{MARKER}:{app_id}");
         let mut args = vec![
@@ -319,7 +324,7 @@ impl<R: Runner> CloudflareTarget<R> {
             args.push("--var".to_string());
             args.push(format!("{k}:{v}"));
         }
-        self.runner.run(&Call { args, stdin: None })
+        args
     }
 }
 
@@ -704,5 +709,58 @@ mod tests {
         let out = run_bounded(cmd, None, Duration::from_secs(30), "echo").unwrap();
         assert!(out.success);
         assert!(out.stdout.contains("hi"));
+    }
+
+    /// A dry run: real `wrangler deploy --dry-run` builds the Worker and exits before any upload, so it needs no account (DESIGN.md D6).
+    /// It proves the real wrangler accepts the exact flags `deploy` sends; the Cloudflare side still waits for a test account.
+    fn dry_run_deploy(extra_flag: Option<&str>) -> Output {
+        let dir = std::env::temp_dir().join(format!(
+            "webhostant-dry-{}-{}",
+            std::process::id(),
+            extra_flag.is_some()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("index.js"),
+            "export default { fetch() { return new Response(\"ok\"); } };
+",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("wrangler.toml"),
+            "name = \"dry-app\"
+main = \"index.js\"
+compatibility_date = \"2025-01-01\"
+",
+        )
+        .unwrap();
+        let t = CloudflareTarget::new(ProcessRunner::default(), &dir, |_| true);
+        let mut args = t.deploy_args("dry-app", &[("APP_BASE_URL", "https://example.test")]);
+        args.push("--dry-run".to_string());
+        args.extend(extra_flag.map(str::to_string));
+        let out = ProcessRunner::default().run(&Call { args, stdin: None });
+        let _ = std::fs::remove_dir_all(&dir);
+        out.expect("wrangler must be installed (npm i -g wrangler); CI installs it")
+    }
+
+    #[test]
+    fn real_wrangler_accepts_the_deploy_arguments_in_a_dry_run() {
+        let out = dry_run_deploy(None);
+        assert!(out.success, "wrangler refused: {}", out.stderr);
+        assert!(
+            out.stdout.contains("--dry-run: exiting now"),
+            "{}",
+            out.stdout
+        );
+        // Variables are shown by name with the value hidden, so no value leaks into the output we keep.
+        assert!(out.stdout.contains("env.APP_BASE_URL"), "{}", out.stdout);
+        assert!(!out.stdout.contains("example.test"), "{}", out.stdout);
+    }
+
+    #[test]
+    fn the_dry_run_can_fail() {
+        // Positive control: the same call with a flag wrangler does not know must fail, so the test above is not a pass-through.
+        let out = dry_run_deploy(Some("--no-such-flag"));
+        assert!(!out.success);
     }
 }
