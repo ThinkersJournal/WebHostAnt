@@ -14,6 +14,7 @@ pub mod cloudflare_domains;
 pub mod configurant_source;
 pub mod conformance;
 pub mod fake;
+pub mod render;
 
 pub use error::Error;
 pub use host::{
