@@ -159,11 +159,12 @@ fn main() -> ExitCode {
     // 3. Apply only the approved plan, then read the host back.
     match host.apply_approved(&plan, &approved, &EnvSecrets::new()) {
         Ok(done) => {
+            // Counts only: the plan above already showed the person which names were changed, and secret names stay out of what is logged.
             println!(
-                "applied {} step(s). read back: settings {:?}, secrets {:?}, healthy {}",
+                "applied {} step(s). read back: {} setting(s), {} secret(s) confirmed, healthy {}",
                 done.steps_applied,
-                done.read_back.settings,
-                done.read_back.secret_names,
+                done.read_back.settings.len(),
+                done.read_back.secret_names.len(),
                 done.read_back.healthy
             );
             ExitCode::SUCCESS
