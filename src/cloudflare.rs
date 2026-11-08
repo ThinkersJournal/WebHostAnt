@@ -181,12 +181,14 @@ fn kill_tree(child: &mut std::process::Child) {
     let _ = child.kill();
 }
 
+type Probe = Box<dyn Fn(&str) -> bool>;
+
 /// A Cloudflare Worker, driven through a [`Runner`].
 pub struct CloudflareTarget<R: Runner> {
     runner: R,
     project_dir: PathBuf,
     probe: Box<dyn Fn(&str) -> bool>,
-    ready: Option<Box<dyn Fn(&str) -> bool>>,
+    ready: Option<Probe>,
     domains: Option<Domains<Box<dyn Rest>>>,
     trusted: BTreeSet<Op>,
     log: RefCell<Vec<String>>,
