@@ -37,9 +37,9 @@ PM allocates at gate). Memory rule: CARGO_BUILD_JOBS=2, one build at a time. Rep
 Relaunch pins `--model sonnet`. Read C:\Projects\THROTTLE.md first. Channel: Synapse only (`pm@ciresnave`); my session was dropped by the 2026-10-30 restart, PM said do NOT re-claim. Do not loop on GitHub PR status.
 
 ## State (2026-11-08)
-PM TASK 2026-11-08 (Cloudflare path): ROADMAP rows C1-C8 merged (#31). In review: #32 C1 DeleteSecret (0.0.33, `c1-delete-secret`), #33 C2 EnvSecrets (0.0.34, `c2-env-secrets`, STACKED on #32, head 040703c). Worktrees `../WebHostAnt-wt-c1-delete-secret`, `../WebHostAnt-wt-c2-env-secrets`.
-**TASK (waiter):** when #32 merges, retarget #33 to main (`gh pr edit 33 --base main`), tell the PM; when each merges: remove its worktree (check `git status --porcelain`), `git worktree prune`, `git branch -D <branch>`, confirm remote branch absent. If CI reds on the timing test `a_call_that_outlives_its_limit...`, re-run once and tell the PM.
-**NEXT unblocked row: C3** (exit code only, `wrangler` `.cmd` shim on Windows, readiness wait after a container deploy; ROADMAP.md), stacked on #33 if both still open.
+PM TASK 2026-11-08 (Cloudflare path): ROADMAP rows C1-C8 merged (#31); C1 (#32, 0.0.33) and C2 EnvSecrets (#33, 0.0.34, main 950552b) merged. In review: #34 C3 readiness wait (0.0.35, `c3-ready-wait`, on main, [READY] sent). Worktree `../WebHostAnt-wt-c3-ready-wait`.
+**TASK (waiter):** when #34 merges: remove that worktree (check `git status --porcelain`), `git worktree prune`, `git branch -D c3-ready-wait`, confirm remote branch absent. The timing test `a_call_that_outlives_its_limit...` can red in a loaded run: re-run once and tell the PM.
+**NEXT unblocked row: C4** read-only preflight (wrangler/Docker present and recent, login present, token scopes named present/missing); ROADMAP.md. Stack on #34 only if it is still open.
 No WAIT lines. Render slice 3 stays held behind the Cloudflare rows.
 Render test account needs (do NOT ask; PM puts on board 320 next to D6): dedicated workspace + API key + workspace id + public test image. Cloudflare real-token rows wait for D6: run `docs/RELEASE-CHECKLIST.md` by hand before releases touching cloudflare.rs. D7, D8, local serving/TLS (WebServAnt 0.0.0) still wait.
 
