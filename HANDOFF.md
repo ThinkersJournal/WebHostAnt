@@ -37,9 +37,9 @@ PM allocates at gate). Memory rule: CARGO_BUILD_JOBS=2, one build at a time. Rep
 Relaunch pins `--model sonnet`. Read C:\Projects\THROTTLE.md first. Channel: Synapse only (`pm@ciresnave`); my session was dropped by the 2026-10-30 restart, PM said do NOT re-claim. Do not loop on GitHub PR status.
 
 ## State (2026-11-08)
-PM TASK 2026-11-08 (Cloudflare path): ROADMAP rows C1-C8 merged (#31); C1 (#32, 0.0.33), C2 (#33, 0.0.34) and C3 readiness wait (#34, 0.0.35, main d612235) merged. In review: C4 preflight (0.0.36, branch `c4-preflight`, on main, [READY] sent). Worktree `../WebHostAnt-wt-c4-preflight`.
-**TASK (waiter):** when C4 merges: remove that worktree (check `git status --porcelain`), `git worktree prune`, `git branch -D c4-preflight`, confirm remote branch absent. The timing test `a_call_that_outlives_its_limit...` can red in a loaded run: re-run once and tell the PM.
-**NEXT unblocked row: C5** a runnable example (plan, show, approve digest, apply, read back) against any Worker project dir (`examples/preflight.rs` exists); its REAL run on a throwaway Worker needs CireSnave's wrangler login or the D6 account: [ASK] the PM before that run, never before. C6 (Cloudflare `Restore`) needs C5's real run.
+PM TASK 2026-11-08 (Cloudflare path): ROADMAP rows C1-C8 merged (#31); C1-C4 merged (#32-#35, main 505a027, 0.0.36). In review: C5 deploy example (0.0.37, branch `c5-deploy-example`, on main, [READY] sent). Worktree `../WebHostAnt-wt-c5-deploy-example`.
+**TASK (waiter):** when C5 merges: remove that worktree (check `git status --porcelain`), `git worktree prune`, `git branch -D c5-deploy-example`, confirm remote branch absent. The timing test `a_call_that_outlives_its_limit...` can red in a loaded run: re-run once and tell the PM.
+**HELD (needs the PM's go):** the REAL run of `examples/deploy.rs` on a throwaway Worker (CireSnave's wrangler login or the D6 account; RELEASE-CHECKLIST steps 3-6, one operation at a time, shapes only). [ASK] sent with C5's [READY]. After it: C6 Cloudflare `Restore`. C7 waits for SecretAnt row 3, C8 for WebServAnt.
 No WAIT lines. Render slice 3 stays held behind the Cloudflare rows.
 Render test account needs (do NOT ask; PM puts on board 320 next to D6): dedicated workspace + API key + workspace id + public test image. Cloudflare real-token rows wait for D6: run `docs/RELEASE-CHECKLIST.md` by hand before releases touching cloudflare.rs. D7, D8, local serving/TLS (WebServAnt 0.0.0) still wait.
 

@@ -10,6 +10,9 @@ Nothing here is automated, and nothing here may use a production account or a to
 4. Opt in one operation at a time (`trust_operations`), in this order: `Create`, `SetSetting`, `SetSecret`, `Restore`. After each, read the real
    `wrangler deployments list --json`, `versions view --json`, `secret list --format json` output and compare it with the shapes marked UNVERIFIED in
    `src/cloudflare.rs`; paste the **shapes** (field names), never values, into the PR.
+   `examples/deploy.rs` does steps 3 and 4 for you, one operation at a time: run it without `--approve` (prints the plan and digest, changes nothing), read
+   the plan, then run it again with `--approve <digest> --trust <that one operation>`. `cargo run --example preflight` first says whether wrangler, the login and
+   the scopes are in order. Secret values come from environment variables, never arguments.
 5. Confirm by eye: the secret value appears in no log line, no PR text and no `Debug` output; the "does not exist" wording is code 10007 as assumed.
 6. Delete the throwaway Worker and revoke the token. Record both in the PR.
 7. A shape that differs from the code is a bug in the code: fix it in the same release or leave that operation `Unverified` and say so in the changelog.
