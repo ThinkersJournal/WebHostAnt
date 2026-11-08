@@ -46,6 +46,7 @@ One PR per row, red first, mutations listed in each PR. Rows C1 to C6 are builda
 | C5 | A small runnable example (`examples/`): plan, show, approve the digest, apply, read back, against any Worker project directory; run by hand under `docs/RELEASE-CHECKLIST.md` on a throwaway Worker to close the UNVERIFIED shapes | CireSnave's wrangler login or the D6 account, only for the by-hand run |
 | C6 | `Restore` for Cloudflare from the previous version id; states plainly what a container rollback does and does not undo | by-hand run of C5 for the shape |
 | C7 | SecretAnt source adapter | SecretAnt row 3 |
+| C9 | Self-hosted-runner row: the real-target tests (what `examples/deploy.rs` did by hand: create, setting, secret, delete-secret, restore, then delete the Worker and check the account's Workers are unchanged) run in CI against the D6 test account. The account id comes from the environment (`CLOUDFLARE_ACCOUNT_ID`), never a file, so CI can substitute; the token comes from the secrets store (PM's `with-secret`, env `CLOUDFLARE_API_TOKEN`); throwaway Worker names only, cleanup always, a leftover Worker fails the run. Cargo feature or test gate that is NOT `#[ignore]` (portfolio rule 5.1g/5.1h) | the PM: runner label and secret delivery; [ASK] before any run that needs the vault |
 | C8 | Local serving and TLS | WebServAnt published |
 
 Open on board 320: D6 (test account) does not block C1 to C4 or the build of C5; it blocks only C5's real run and the shapes. D7 (ConfigurAnt additions) is not needed by C1 to C6

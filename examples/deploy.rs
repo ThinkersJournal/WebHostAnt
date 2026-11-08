@@ -10,8 +10,10 @@
 //! The second applies exactly that plan, and only if its digest is the one given:
 //!
 //! ```text
-//! ... the same arguments ... --approve <digest> --trust create,set-setting,set-secret,delete-secret
+//! ... the same arguments ... --approve <digest> --trust create,set-setting,set-secret,delete-secret,restore
 //! ```
+//!
+//! `--rollback-after` (with `--trust restore`) then undoes what was just applied and reads the target back: for checking `Restore` on a throwaway Worker.
 //!
 //! Secret VALUES are read from environment variables of the secret's own name (for example exported by `with-secret`), never from arguments. Nothing
 //! here prints a value, an email or an account. `--trust` claims an operation was proven by a real run: use it only as `docs/RELEASE-CHECKLIST.md`
@@ -22,7 +24,7 @@ use std::time::Duration;
 
 use webhostant::cloudflare::{CloudflareTarget, ProcessRunner};
 use webhostant::preflight::Preflight;
-use webhostant::{AppManifest, Config, EnvSecrets, HealthProbe, Host, Op, WaitPolicy};
+use webhostant::{AppManifest, Config, EnvSecrets, HealthProbe, Host, Op, Rollback, WaitPolicy};
 
 struct Args {
     project: String,
@@ -34,6 +36,7 @@ struct Args {
     without: Vec<String>,
     containers: bool,
     approve: Option<String>,
+    rollback_after: bool,
     trust: Vec<Op>,
 }
 
@@ -48,6 +51,7 @@ fn parse() -> Result<Args, String> {
         without: Vec::new(),
         containers: false,
         approve: None,
+        rollback_after: false,
         trust: Vec::new(),
     };
     let mut it = std::env::args().skip(1);
@@ -67,6 +71,7 @@ fn parse() -> Result<Args, String> {
             "--without-secret" => a.without.push(value("a name")?),
             "--containers" => a.containers = true,
             "--approve" => a.approve = Some(value("a digest")?),
+            "--rollback-after" => a.rollback_after = true,
             "--trust" => {
                 for name in value("a list")?.split(',') {
                     a.trust.push(match name {
@@ -74,6 +79,7 @@ fn parse() -> Result<Args, String> {
                         "set-setting" => Op::SetSetting,
                         "set-secret" => Op::SetSecret,
                         "delete-secret" => Op::DeleteSecret,
+                        "restore" => Op::Restore,
                         other => return Err(format!("--trust: unknown operation `{other}`")),
                     });
                 }
@@ -165,6 +171,27 @@ fn main() -> ExitCode {
                 "applied {} step(s); every planned change read back; healthy {}",
                 done.steps_applied, done.read_back.healthy
             );
+            if a.rollback_after {
+                // For checking `Restore` on a throwaway Worker: undo what was just applied, then read the target back.
+                let Some(point) = done.rollback_point else {
+                    eprintln!("no rollback point: trust `restore` to get one");
+                    return ExitCode::from(1);
+                };
+                return match host.rollback(&point) {
+                    Rollback::Restored => {
+                        println!("rolled back: the target matches the snapshot");
+                        ExitCode::SUCCESS
+                    }
+                    Rollback::Unchanged => {
+                        println!("rollback: nothing had been applied");
+                        ExitCode::SUCCESS
+                    }
+                    Rollback::Unknown { reason, .. } => {
+                        eprintln!("rollback: state not known: {reason}");
+                        ExitCode::from(1)
+                    }
+                };
+            }
             ExitCode::SUCCESS
         }
         Err(e) => {
