@@ -23,6 +23,7 @@ pub struct AppManifest {
     pub(crate) health_path: String,
     pub(crate) settings: Vec<String>,
     pub(crate) secrets: Vec<String>,
+    pub(crate) absent_secrets: Vec<String>,
     pub(crate) domains: Vec<String>,
     pub(crate) migrations: Option<Migrations>,
 }
@@ -35,6 +36,7 @@ impl AppManifest {
             health_path: "/health".to_string(),
             settings: Vec::new(),
             secrets: Vec::new(),
+            absent_secrets: Vec::new(),
             domains: Vec::new(),
             migrations: None,
         }
@@ -55,6 +57,13 @@ impl AppManifest {
     /// Declare a secret by name. Its value is supplied at apply time, never here.
     pub fn secret(mut self, name: impl Into<String>) -> Self {
         self.secrets.push(name.into());
+        self
+    }
+
+    /// Declare a secret the app must NOT have, by name. A plan deletes it when the host holds it (a deploy keeps old secrets, so a secret the
+    /// app no longer wants stays readable by the app until someone deletes it). A name also declared with [`AppManifest::secret`] is an error.
+    pub fn without_secret(mut self, name: impl Into<String>) -> Self {
+        self.absent_secrets.push(name.into());
         self
     }
 

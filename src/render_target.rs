@@ -198,7 +198,7 @@ impl<R: Rest> Target for RenderTarget<R> {
 
     fn supports(&self, op: Op) -> Support {
         match op {
-            Op::Restore | Op::ReadTls => Support::No,
+            Op::Restore | Op::ReadTls | Op::DeleteSecret => Support::No,
             _ if self.trusted.contains(&op) => Support::Yes,
             _ => Support::Unverified,
         }
@@ -272,6 +272,12 @@ impl<R: Rest> Target for RenderTarget<R> {
                     me.redeploy(id)
                 })
                 .map(|()| "set setting"),
+            Step::DeleteSecret { .. } => {
+                return Err(Error::Unsupported {
+                    target: "render".to_string(),
+                    op: Op::DeleteSecret,
+                });
+            }
             Step::SetSecret { name } => {
                 let value = secret
                     .ok_or_else(|| Error::Target("no value supplied for a secret".to_string()))?;

@@ -123,6 +123,7 @@ impl Plan {
                     field(b'=', value);
                 }
                 Step::SetSecret { name } => field(b'k', name),
+                Step::DeleteSecret { name } => field(b'x', name),
                 Step::BindDomain { name } => field(b'd', name),
             }
         }
@@ -149,6 +150,7 @@ impl fmt::Display for Plan {
                 Step::Create => writeln!(f, "create {}", self.app_id)?,
                 Step::SetSetting { name, value } => writeln!(f, "set {name} = {value}")?,
                 Step::SetSecret { name } => writeln!(f, "set secret {name} (value not shown)")?,
+                Step::DeleteSecret { name } => writeln!(f, "delete secret {name}")?,
                 Step::BindDomain { name } => writeln!(f, "bind domain {name}")?,
             }
         }
@@ -288,6 +290,13 @@ impl<T: Target> Host<T> {
         {
             return Err(Error::InvalidDomain { name: bad.clone() });
         }
+        if let Some(name) = manifest
+            .absent_secrets
+            .iter()
+            .find(|n| manifest.secrets.contains(n))
+        {
+            return Err(Error::SecretBothWays { name: name.clone() });
+        }
         let presence = self.target.locate(&manifest.id)?;
         let mut steps = Vec::new();
         let observed = match presence {
@@ -316,6 +325,11 @@ impl<T: Target> Host<T> {
         for name in &manifest.secrets {
             if !observed.secret_names.contains(name) {
                 steps.push(Step::SetSecret { name: name.clone() });
+            }
+        }
+        for name in &manifest.absent_secrets {
+            if observed.secret_names.contains(name) {
+                steps.push(Step::DeleteSecret { name: name.clone() });
             }
         }
         for name in &manifest.domains {
@@ -529,6 +543,11 @@ impl<T: Target> Host<T> {
                         bad.push(format!("secret {name}"));
                     }
                 }
+                Step::DeleteSecret { name } => {
+                    if observed.secret_names.contains(name) {
+                        bad.push(format!("secret {name} still present"));
+                    }
+                }
                 Step::BindDomain { name } => {
                     if observed.domains.contains(name) {
                         read_back.domains.push(name.clone());
@@ -603,6 +622,119 @@ mod tests {
             .apply_approved(&plan, &plan.digest(), &secrets)
             .unwrap();
         assert!(applied.read_back.healthy);
+    }
+
+    fn without_token() -> AppManifest {
+        AppManifest::new("digest-app").without_secret("API_TOKEN")
+    }
+
+    fn deployed_with_token() -> Host<FakeTarget> {
+        let mut host = Host::new(FakeTarget::new());
+        let plan = host.plan(&app(), &config("https://a.example.org")).unwrap();
+        let secrets = MapSecrets::new().with("API_TOKEN", "t");
+        host.apply_approved(&plan, &plan.digest(), &secrets)
+            .unwrap();
+        host
+    }
+
+    #[test]
+    fn a_secret_the_app_must_not_have_is_deleted_and_read_back_gone() {
+        let mut host = deployed_with_token();
+        let plan = host.plan(&without_token(), &Config::new()).unwrap();
+        assert_eq!(
+            plan.steps(),
+            [Step::DeleteSecret {
+                name: "API_TOKEN".into()
+            }]
+        );
+        assert!(plan.to_string().contains("delete secret API_TOKEN"));
+        host.apply_approved(&plan, &plan.digest(), &MapSecrets::new())
+            .unwrap();
+        // Idempotent: nothing is left to delete.
+        assert!(
+            host.plan(&without_token(), &Config::new())
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            !host
+                .target()
+                .observe("digest-app")
+                .unwrap()
+                .secret_names
+                .contains("API_TOKEN")
+        );
+    }
+
+    #[test]
+    fn nothing_is_deleted_that_the_host_does_not_hold() {
+        let host = Host::new(FakeTarget::new());
+        let plan = host.plan(&without_token(), &Config::new()).unwrap();
+        assert_eq!(plan.steps(), [Step::Create]);
+    }
+
+    #[test]
+    fn a_delete_is_part_of_the_digest_and_a_secret_cannot_be_wanted_and_unwanted() {
+        let host = deployed_with_token();
+        let plan = host.plan(&without_token(), &Config::new()).unwrap();
+        let mut edited = plan.clone();
+        edited.steps.clear();
+        assert_ne!(plan.digest(), edited.digest());
+        let both = AppManifest::new("digest-app")
+            .secret("API_TOKEN")
+            .without_secret("API_TOKEN");
+        assert_eq!(
+            host.plan(&both, &Config::new()),
+            Err(Error::SecretBothWays {
+                name: "API_TOKEN".into()
+            })
+        );
+    }
+
+    #[test]
+    fn a_delete_the_host_ignores_is_a_read_back_mismatch() {
+        // A target that reports success and keeps the secret must not pass the read-back.
+        struct Keeps(FakeTarget);
+        impl Target for Keeps {
+            fn name(&self) -> &str {
+                "keeps"
+            }
+            fn supports(&self, op: Op) -> Support {
+                self.0.supports(op)
+            }
+            fn locate(&self, id: &str) -> Result<Presence, Error> {
+                self.0.locate(id)
+            }
+            fn observe(&self, id: &str) -> Result<crate::Observed, Error> {
+                self.0.observe(id)
+            }
+            fn diagnostics(&self) -> String {
+                self.0.diagnostics()
+            }
+            fn apply_step(
+                &mut self,
+                id: &str,
+                step: &Step,
+                secret: Option<&crate::SecretValue>,
+            ) -> Result<(), Error> {
+                match step {
+                    Step::DeleteSecret { .. } => Ok(()),
+                    _ => self.0.apply_step(id, step, secret),
+                }
+            }
+        }
+        let mut host = Host::new(Keeps(FakeTarget::new()));
+        let plan = host.plan(&app(), &config("https://a.example.org")).unwrap();
+        let secrets = MapSecrets::new().with("API_TOKEN", "t");
+        host.apply_approved(&plan, &plan.digest(), &secrets)
+            .unwrap();
+        let del = host.plan(&without_token(), &Config::new()).unwrap();
+        match host.apply_approved(&del, &del.digest(), &MapSecrets::new()) {
+            Err(Error::ApplyFailed { cause, .. }) => {
+                assert!(matches!(*cause, Error::ReadBackMismatch { .. }))
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     fn data_plan(policy: Option<Migrations>, release: Release) -> Plan {

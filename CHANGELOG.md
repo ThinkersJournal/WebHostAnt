@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.33] - 2026-11-08
+
+- Cloudflare path row C1: a secret the app must NOT have is deleted. `AppManifest::without_secret`, `Op::DeleteSecret`, `Step::DeleteSecret`; a plan adds the delete only when the host holds that name (printed `delete secret NAME`, part of the plan digest, checked gone on read-back). Cloudflare runs `wrangler secret delete` (name in the arguments, the confirmation on stdin, the name kept out of its log and errors; the real wrangler 4.141.0 accepts the arguments in the dry-run test); the fake wrangler answers `Secret not found` for a name it does not hold (an assumed shape, UNVERIFIED until D6). Render answers `DeleteSecret` = `No`. A name declared both wanted and unwanted is `Error::SecretBothWays`. Why: a Cloudflare deploy keeps secrets that were not deleted, and Humboldt's 2026-11-08 demo deploy had to delete three by hand. Mutations (plan never deletes; digest omits the delete; read-back ignores it; misspelled wrangler argument; name in the log) each fail a test. Breaking pre-1.0: new public enum variants (`Op`, `Step`, `Error`). Version provisional; the PM allocates.
+
 ## [0.0.32] - 2026-11-08
 
 - Docs: ROADMAP gains the Cloudflare path build order (rows C1 to C8) from Humboldt's by-hand demo deploy of 2026-11-08, and states what is already built. No code change. Version provisional; the PM allocates.

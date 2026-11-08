@@ -56,6 +56,11 @@ pub enum Error {
         /// The name as declared.
         name: String,
     },
+    /// A secret is declared both wanted and unwanted. Nothing was changed.
+    SecretBothWays {
+        /// The secret's name.
+        name: String,
+    },
     /// The plan to apply is not the plan that was approved. Nothing was changed.
     PlanChanged,
     /// The target reported a failure of its own.
@@ -113,6 +118,10 @@ impl fmt::Display for Error {
             Error::InvalidDomain { name } => write!(
                 f,
                 "`{name}` is not a host name WebHostAnt can bind; use letters, digits, hyphens and dots only, like app.example.org (no scheme, port, path, wildcard or address)"
+            ),
+            Error::SecretBothWays { name } => write!(
+                f,
+                "secret `{name}` is declared both wanted and unwanted; nothing was changed. Keep it in one list"
             ),
             Error::PlanChanged => write!(
                 f,
