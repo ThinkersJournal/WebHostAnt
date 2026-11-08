@@ -193,3 +193,107 @@ impl Secrets for MapSecrets {
         self.0.get(name).cloned()
     }
 }
+
+type Lookup = Box<dyn Fn(&str) -> Option<String>>;
+
+/// Secrets read from environment variables, as a tool such as `with-secret` exports them for one process. A secret name maps to the variable of
+/// the same name unless [`EnvSecrets::var`] says otherwise. A variable that is unset, empty or not valid text gives no value (an empty secret is never
+/// sent). Its `Debug` shows the names it knows, never a value.
+pub struct EnvSecrets {
+    vars: BTreeMap<String, String>,
+    lookup: Lookup,
+}
+
+impl EnvSecrets {
+    /// Read from this process's environment.
+    pub fn new() -> Self {
+        Self::with_lookup(|var| std::env::var(var).ok())
+    }
+
+    /// Read through `lookup` instead of the environment (for tests, or a caller that holds its own table).
+    pub fn with_lookup(lookup: impl Fn(&str) -> Option<String> + 'static) -> Self {
+        Self {
+            vars: BTreeMap::new(),
+            lookup: Box::new(lookup),
+        }
+    }
+
+    /// Read the secret `name` from the variable `var` instead of a variable called `name`.
+    pub fn var(mut self, name: impl Into<String>, var: impl Into<String>) -> Self {
+        self.vars.insert(name.into(), var.into());
+        self
+    }
+}
+
+impl Default for EnvSecrets {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Secrets for EnvSecrets {
+    fn get(&self, name: &str) -> Option<SecretValue> {
+        let var = self.vars.get(name).map_or(name, String::as_str);
+        (self.lookup)(var)
+            .filter(|v| !v.is_empty())
+            .map(SecretValue::new)
+    }
+}
+
+impl fmt::Debug for EnvSecrets {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EnvSecrets")
+            .field("mapped", &self.vars.keys().collect::<Vec<_>>())
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod env_tests {
+    use super::*;
+
+    fn table() -> EnvSecrets {
+        EnvSecrets::with_lookup(|var| match var {
+            "API_TOKEN" => Some("CANARY-env-1".to_string()),
+            "RENAMED_VAR" => Some("CANARY-env-2".to_string()),
+            "EMPTY_ONE" => Some(String::new()),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn a_secret_reads_the_variable_of_its_name_or_the_one_it_is_mapped_to() {
+        let s = table().var("DB", "RENAMED_VAR");
+        assert_eq!(s.get("API_TOKEN").unwrap().expose(), "CANARY-env-1");
+        assert_eq!(s.get("DB").unwrap().expose(), "CANARY-env-2");
+        // A mapped name does not also read the variable called by its own name.
+        let s = table().var("API_TOKEN", "NOT_SET_ANYWHERE");
+        assert!(s.get("API_TOKEN").is_none());
+    }
+
+    #[test]
+    fn unset_and_empty_give_no_value() {
+        let s = table();
+        assert!(s.get("NOT_THERE").is_none());
+        assert!(s.get("EMPTY_ONE").is_none());
+    }
+
+    #[test]
+    fn debug_shows_no_value() {
+        let s = table().var("DB", "RENAMED_VAR");
+        let _ = s.get("API_TOKEN");
+        assert!(!format!("{s:?}").contains("CANARY-env"));
+        assert!(!format!("{:?}", s.get("DB")).contains("CANARY-env"));
+    }
+
+    #[test]
+    fn the_real_environment_is_read_and_a_missing_variable_is_not_made_up() {
+        // PATH is set in every environment these tests run in; the other name is not.
+        assert!(EnvSecrets::new().get("PATH").is_some());
+        assert!(
+            EnvSecrets::new()
+                .get("WEBHOSTANT_SURELY_NOT_SET_7F3A")
+                .is_none()
+        );
+    }
+}

@@ -21,6 +21,6 @@ pub use error::Error;
 pub use host::{
     Applied, DataAfterRollback, Host, Plan, ReadBack, Release, Rollback, RollbackPoint, StepOutcome,
 };
-pub use manifest::{AppManifest, Config, MapSecrets, Migrations, SecretValue, Secrets};
+pub use manifest::{AppManifest, Config, EnvSecrets, MapSecrets, Migrations, SecretValue, Secrets};
 pub use probe::{Health, HealthProbe};
 pub use target::{Observed, Op, Presence, Renewal, Snapshot, Step, Support, Target, TlsStatus};

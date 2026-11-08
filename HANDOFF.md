@@ -37,10 +37,10 @@ PM allocates at gate). Memory rule: CARGO_BUILD_JOBS=2, one build at a time. Rep
 Relaunch pins `--model sonnet`. Read C:\Projects\THROTTLE.md first. Channel: Synapse only (`pm@ciresnave`); my session was dropped by the 2026-10-30 restart, PM said do NOT re-claim. Do not loop on GitHub PR status.
 
 ## State (2026-11-08)
-PM TASK 2026-11-08 (Cloudflare path): ROADMAP rows C1-C8 merged (#31, main 5c98949). C1 DeleteSecret = PR #32 `c1-delete-secret` (0.0.33, head 1d7ed76, [READY] sent), worktree `../WebHostAnt-wt-c1-delete-secret`.
-**TASK (waiter):** when #32 merges: remove that worktree (check `git status --porcelain`), `git worktree prune`, `git branch -D c1-delete-secret`, confirm remote branch absent (the forge auto-deletes it).
-**NEXT unblocked row: C2** `EnvSecrets` (a `Secrets` source reading named env vars), one PR, red first, mutations listed; then C3, C4, C5, C6 (ROADMAP.md). Do not stack on #32 unless needed: C2 touches only manifest.rs.
-No WAIT lines. Render slice 3 stays held behind the Cloudflare rows. Existing timing test `a_call_that_outlives_its_limit...` can fail in a loaded full run; passes alone.
+PM TASK 2026-11-08 (Cloudflare path): ROADMAP rows C1-C8 merged (#31). In review: #32 C1 DeleteSecret (0.0.33, `c1-delete-secret`), #33 C2 EnvSecrets (0.0.34, `c2-env-secrets`, STACKED on #32, head 040703c). Worktrees `../WebHostAnt-wt-c1-delete-secret`, `../WebHostAnt-wt-c2-env-secrets`.
+**TASK (waiter):** when #32 merges, retarget #33 to main (`gh pr edit 33 --base main`), tell the PM; when each merges: remove its worktree (check `git status --porcelain`), `git worktree prune`, `git branch -D <branch>`, confirm remote branch absent. If CI reds on the timing test `a_call_that_outlives_its_limit...`, re-run once and tell the PM.
+**NEXT unblocked row: C3** (exit code only, `wrangler` `.cmd` shim on Windows, readiness wait after a container deploy; ROADMAP.md), stacked on #33 if both still open.
+No WAIT lines. Render slice 3 stays held behind the Cloudflare rows.
 Render test account needs (do NOT ask; PM puts on board 320 next to D6): dedicated workspace + API key + workspace id + public test image. Cloudflare real-token rows wait for D6: run `docs/RELEASE-CHECKLIST.md` by hand before releases touching cloudflare.rs. D7, D8, local serving/TLS (WebServAnt 0.0.0) still wait.
 
 Docs: `docs/SECOND-HOST.md`, `docs/TLS-NEED-LIST.md`, `docs/HTTPS-CLIENT-NEEDS.md`, `docs/CONSUMER-CONTRACT.md`, ROADMAP.md. Gotchas: CRLF-in-worktree/LF-in-blob (scripted replaces assert count==1); worktree, never switch the primary; `wrangler` is a `.cmd` shim; tests must print fixed labels (CodeQL); `supertool` untracked, leave alone; this HANDOFF is an uncommitted local edit (commit with the next PR).

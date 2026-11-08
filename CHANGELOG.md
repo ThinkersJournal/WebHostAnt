@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.34] - 2026-11-08
+
+- Cloudflare path row C2: `EnvSecrets`, a `Secrets` source that reads named environment variables, which is how Humboldt's 2026-11-08 demo deploy delivered `DATABASE_URL` (a tool exports it to one process). A secret reads the variable of its own name, or another via `EnvSecrets::var`; an unset, empty or non-text variable gives no value (an empty secret is never sent), so `apply` still stops with `MissingSecret` before changing anything. `with_lookup` replaces the environment for tests. Its `Debug` shows mapped names, never a value. Mutations (empty value passed through; mapping ignored) fail tests. Not breaking: new public type. Version provisional; the PM allocates.
+
 ## [0.0.33] - 2026-11-08
 
 - Cloudflare path row C1: a secret the app must NOT have is deleted. `AppManifest::without_secret`, `Op::DeleteSecret`, `Step::DeleteSecret`; a plan adds the delete only when the host holds that name (printed `delete secret NAME`, part of the plan digest, checked gone on read-back). Cloudflare runs `wrangler secret delete` (name in the arguments, the confirmation on stdin, the name kept out of its log and errors; the real wrangler 4.141.0 accepts the arguments in the dry-run test); the fake wrangler answers `Secret not found` for a name it does not hold (an assumed shape, UNVERIFIED until D6). Render answers `DeleteSecret` = `No`. A name declared both wanted and unwanted is `Error::SecretBothWays`. Why: a Cloudflare deploy keeps secrets that were not deleted, and Humboldt's 2026-11-08 demo deploy had to delete three by hand. Mutations (plan never deletes; digest omits the delete; read-back ignores it; misspelled wrangler argument; name in the log) each fail a test. Breaking pre-1.0: new public enum variants (`Op`, `Step`, `Error`). Version provisional; the PM allocates.
