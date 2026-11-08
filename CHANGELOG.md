@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.32] - 2026-11-08
+
+- Docs: ROADMAP gains the Cloudflare path build order (rows C1 to C8) from Humboldt's by-hand demo deploy of 2026-11-08, and states what is already built. No code change. Version provisional; the PM allocates.
+
 ## [0.0.31] - 2026-10-31
 
 - Render adapter, slice 2 (module `render_target`; stacked on 0.0.30): `RenderTarget`, a `Target` over `RenderApi`. A service is ours when its variable `WEBHOSTANT_APP` equals the app id; a secret is a variable whose name is listed in `WEBHOSTANT_SECRETS` and is reported by name only (Render's variable schema has no secret flag; whether the API shows a value to a token holder is UNVERIFIED). Create waits for the first deploy; every variable change triggers a deploy that is waited for (whether Render redeploys by itself on a variable change is UNVERIFIED); a failed deploy is an error, a deploy that never goes live is `TimedOut`. Domains are bound with the custom-domain call. `Restore` and `ReadTls` are `No` for now. Every operation is `Unverified` until trusted. The conformance suite passes against a fake that answers in the schema's shapes. Six mutations (secret left in settings, in-progress counted as live, failed deploy ignored, restore claimed, secret not listed, everything ours) fail tests. `RenderApi::create_web_service` now returns `Created` (service plus first deploy id). Per the PM's ruling the secret limitation is stated loudly: in the module docs, in `RenderTarget::help()` and in `docs/SECOND-HOST.md` (on Render a secret is an ordinary environment variable that the API may show to any holder of the API key; use a dedicated workspace and key); `RenderTarget` and `RenderApi` have a `Debug` that carries no value, and a test checks `Debug`, `help()` and the log for a canary. Version 0.0.31 allocated by the PM.

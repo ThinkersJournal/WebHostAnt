@@ -1,6 +1,6 @@
 # Roadmap
 
-Nothing is built. Order, set by the PM on CireSnave's proposal (2026-10-28):
+Built at 0.0.31 (2026-11-08): the contract types and conformance harness, a Cloudflare Worker target (wrangler), Cloudflare domain binding and `ReadTls` over REST, a Render target, the HTTPAnt health probe, ConfigurAnt projection. Every real-account shape is still UNVERIFIED (D6). Original order, set by the PM on CireSnave's proposal (2026-10-28):
 
 1. Wait for the Humboldt installer's first slices to show what the interface needs (extract after two consumers).
 2. (Drafted: `docs/DESIGN.md`, awaiting CireSnave decisions.) A short design note and a build-or-adopt comparison (Caddy and other existing deployment/TLS tools, ACME libraries).
@@ -21,3 +21,32 @@ Order: HTTPAnt -> WebServAnt (`webservant`) -> WebHostAnt local serving/TLS. Now
 CireSnave, 2026-10-28, first-hand, verbatim: *"I'm fine with Cloudflare as the first remote server. Secrets should be pushed. The 'is our app here' would likely be a configuration retrieval request ... it is needed for configuration."* and *"we delay local serving entirely until WebServAnt is available. Doesn't that negate the docker server?"*
 
 So: first remote target Cloudflare only; secrets are pushed (names and values from SecretAnt at deploy; manual paste is the fallback); presence is host-side (the host's API with the host credential), then an authenticated configuration retrieval from the app, with **no unauthenticated tier** (CireSnave: *"why would an 'Is our app here?' respond at all to unauthenticated users?"*); see `docs/CONSUMER-CONTRACT.md` 1a. Open for CireSnave: D6 test account, D7 ConfigurAnt additions, D8 ReleaseAnt.
+
+## Cloudflare path (PM task 2026-11-08; CireSnave 2026-11-08 verbatim: *"Yes, go ahead and get WebHostAnt started on the Cloudflare path."*)
+
+Requirements come from Humboldt's by-hand demo deploy of 2026-11-08 (`.lane-state/humboldt-demo-deploy*.ps1/.out`): install the database, `wrangler secret put` each secret, delete
+secrets the app must not have, `wrangler deploy` (a Worker plus a container), poll `/health` until the container is up (about 10 minutes allowed), smoke checks. What went wrong by
+hand, and the row that fixes it:
+
+- A deploy KEEPS secrets that were not deleted, and the adapter cannot delete one: row C1.
+- Secret values reached the script through the process environment (`with-secret`), with no `Secrets` source for that: row C2.
+- A PowerShell script read an npm notice on stderr as an error; the adapter must trust the exit code only, and find `wrangler` behind its `.cmd` shim: row C3.
+- The container needs minutes after `deploy` before `/health` answers: row C3.
+- A token without the Containers scope fails late; scopes beyond Pages, Workers and Containers are unchecked: row C4.
+- Worker secrets are write-only, so existence is checked by name (already so in `secret_names`).
+
+One PR per row, red first, mutations listed in each PR. Rows C1 to C6 are buildable now against fakes; none needs a decision from CireSnave.
+
+| Row | Slice | Needs |
+|---|---|---|
+| C1 | `Op::DeleteSecret` and `Step::DeleteSecret`: the manifest names secrets that must be absent; planning compares with the observed names; Cloudflare runs `wrangler secret delete`; plan text and digest show it | nothing |
+| C2 | `EnvSecrets`: a `Secrets` source that reads named environment variables (what `with-secret` exports); a value never reaches `Debug`, errors or the log | nothing |
+| C3 | Deploy hardening: success from the exit code only, the real `wrangler` found on Windows, and a readiness wait (`HealthProbe` retried until a deadline, each answer reported) after a container deploy | nothing |
+| C4 | Read-only preflight: `wrangler` and Docker present and recent enough, login present, token scopes that the deploy needs named as present or missing (names only) | nothing |
+| C5 | A small runnable example (`examples/`): plan, show, approve the digest, apply, read back, against any Worker project directory; run by hand under `docs/RELEASE-CHECKLIST.md` on a throwaway Worker to close the UNVERIFIED shapes | CireSnave's wrangler login or the D6 account, only for the by-hand run |
+| C6 | `Restore` for Cloudflare from the previous version id; states plainly what a container rollback does and does not undo | by-hand run of C5 for the shape |
+| C7 | SecretAnt source adapter | SecretAnt row 3 |
+| C8 | Local serving and TLS | WebServAnt published |
+
+Open on board 320: D6 (test account) does not block C1 to C4 or the build of C5; it blocks only C5's real run and the shapes. D7 (ConfigurAnt additions) is not needed by C1 to C6
+(projection is built). D8 (ReleaseAnt and installer files) is not needed.
