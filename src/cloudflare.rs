@@ -3,7 +3,7 @@
 //! **Checked once against a real account (2026-11-08, `wrangler` 4.141.0, a throwaway Worker; `docs/CLOUDFLARE-FACTS.md`):** `Create`, `SetSetting`,
 //! `SetSecret` and `DeleteSecret` each ran for real and read back correctly, and the answer shapes below match. That is one run by hand, not a test account
 //! (DESIGN.md D6), so every operation still reports [`Support::Unverified`] and a real plan is refused until the caller opts in with
-//! [`CloudflareTarget::trust_operations`]. `Restore` has not been tried.
+//! [`CloudflareTarget::trust_operations`]. `Restore` (below) ran once for real on a throwaway Worker (docs/CLOUDFLARE-FACTS.md).
 //! The conformance suite runs against it through a fake [`Runner`] in this module's tests.
 //!
 //! Needs Node, `wrangler` and (to deploy a container) Docker on the machine that runs it; see `docs/CLOUDFLARE-FACTS.md`.
@@ -18,7 +18,9 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 use crate::cloudflare_domains::{Domains, Rest, tls_findings};
-use crate::{Error, Observed, Op, Presence, SecretValue, Step, Support, Target, TlsStatus};
+use crate::{
+    Error, Observed, Op, Presence, SecretValue, Snapshot, Step, Support, Target, TlsStatus,
+};
 
 /// The plain setting that marks a Worker as deployed by WebHostAnt for this app id. A Worker without it is never ours.
 pub const MARKER: &str = "WEBHOSTANT_APP";
@@ -227,6 +229,29 @@ fn secret_name_put_args(name: &str, app_id: &str) -> Vec<String> {
     strings(&["secret", "put", name, "--name", app_id])
 }
 
+/// Arguments of `wrangler rollback`: the version id (checked by [`valid_version_id`] before any call) and the app name. No secret is involved.
+fn rollback_args(version: &str, app_id: &str) -> Vec<String> {
+    strings(&[
+        "rollback",
+        version,
+        "--name",
+        app_id,
+        "--message",
+        "webhostant rollback",
+        "--yes",
+    ])
+}
+
+/// Arguments of `wrangler delete`, used only to undo a first deploy (see `restore`).
+fn delete_worker_args(app_id: &str, project_dir: &str) -> Vec<String> {
+    strings(&["delete", "--name", app_id, "--cwd", project_dir, "--force"])
+}
+
+/// A Worker version id as Cloudflare prints it: hex digits and dashes. Anything else could be read as a flag, so it is never passed on.
+fn valid_version_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+}
+
 /// Arguments of `wrangler secret delete`: the NAME only. Wrangler asks "are you sure"; the answer travels on stdin.
 fn secret_delete_args(name: &str, app_id: &str) -> Vec<String> {
     strings(&["secret", "delete", name, "--name", app_id])
@@ -275,8 +300,8 @@ impl<R: Runner> CloudflareTarget<R> {
         Call { args, stdin: None }
     }
 
-    /// The Worker's plain bindings, or `None` when the Worker does not exist.
-    fn bindings(&self, app_id: &str) -> Result<Option<BTreeMap<String, String>>, Error> {
+    /// The id of the version that is deployed now, or `None` when the Worker does not exist.
+    fn current_version(&self, app_id: &str) -> Result<Option<String>, Error> {
         let list = self.runner.run(&self.call(deployments_list_args(app_id)))?;
         if !list.success {
             return if looks_absent(&list.stderr) {
@@ -305,6 +330,14 @@ impl<R: Runner> CloudflareTarget<R> {
             .ok_or_else(|| {
                 Error::Target("could not read a version id from the deployment list".to_string())
             })?;
+        Ok(Some(version))
+    }
+
+    /// The Worker's plain bindings, or `None` when the Worker does not exist.
+    fn bindings(&self, app_id: &str) -> Result<Option<BTreeMap<String, String>>, Error> {
+        let Some(version) = self.current_version(app_id)? else {
+            return Ok(None);
+        };
         let view = self
             .runner
             .run(&self.call(versions_view_args(&version, app_id)))?;
@@ -400,11 +433,8 @@ impl<R: Runner> Target for CloudflareTarget<R> {
     }
 
     fn supports(&self, op: Op) -> Support {
-        // No previous-version handle is read yet, so this adapter cannot put an app back (docs/ROLLBACK-DESIGN.md).
         // Domain binding needs the REST API configured (`with_domains`); without it never claim it.
-        if op == Op::Restore
-            || (matches!(op, Op::BindDomain | Op::ReadTls) && self.domains.is_none())
-        {
+        if matches!(op, Op::BindDomain | Op::ReadTls) && self.domains.is_none() {
             Support::No
         } else if self.trusted.contains(&op) {
             Support::Yes
@@ -439,6 +469,91 @@ impl<R: Runner> Target for CloudflareTarget<R> {
             },
             healthy: (self.probe)(app_id),
         })
+    }
+
+    fn snapshot(&self, app_id: &str) -> Result<Snapshot, Error> {
+        match self.locate(app_id)? {
+            Presence::Ours => Ok(Snapshot {
+                existed: true,
+                observed: self.observe(app_id)?,
+                // The version deployed now: what `restore` rolls back to.
+                handle: self.current_version(app_id)?,
+            }),
+            Presence::Absent => Ok(Snapshot {
+                existed: false,
+                observed: Observed::default(),
+                handle: None,
+            }),
+            Presence::NotOurs => Err(Error::NotOurs {
+                app: app_id.to_string(),
+            }),
+        }
+    }
+
+    /// Put the Worker back to the version that was deployed at the snapshot (`wrangler rollback`), or, when it did not exist then, delete the Worker
+    /// this apply created (never one the marker does not show to be ours).
+    ///
+    /// What this does NOT undo: data in any store the Worker uses; a container's image or running instances (UNVERIFIED: whether a Worker rollback
+    /// reverts what a Container binding runs); a secret's old VALUE (only which names exist is read back); domain bindings (a separate REST call).
+    fn restore(&mut self, app_id: &str, snapshot: &Snapshot) -> Result<(), Error> {
+        let (text, call) = if snapshot.existed {
+            let version = snapshot.handle.as_deref().filter(|v| valid_version_id(v));
+            let Some(version) = version else {
+                return Err(Error::Target(
+                    "the snapshot has no usable version id to roll back to".to_string(),
+                ));
+            };
+            ("rollback", self.call(rollback_args(version, app_id)))
+        } else {
+            match self.locate(app_id)? {
+                // Nothing was created, so there is nothing to remove.
+                Presence::Absent => return Ok(()),
+                Presence::Ours => {}
+                Presence::NotOurs => {
+                    return Err(Error::NotOurs {
+                        app: app_id.to_string(),
+                    });
+                }
+            }
+            let dir = self.project_dir.to_string_lossy().into_owned();
+            ("delete", self.call(delete_worker_args(app_id, &dir)))
+        };
+        if snapshot.existed {
+            // Checked on a real account 2026-11-08: a rollback puts the version's settings back but leaves a secret made after that version in the
+            // Worker's secret list, and once rolled back the latest version is no longer the deployed one, so Cloudflare refuses to change a secret
+            // (code 10215). So the secrets the snapshot did not have are deleted BEFORE the rollback, while the latest version is still deployed. A
+            // secret that existed then and was deleted since cannot come back (its value is gone) and shows as a difference.
+            let extra: Vec<String> = self
+                .secret_names(app_id)?
+                .difference(&snapshot.observed.secret_names)
+                .cloned()
+                .collect();
+            for name in extra {
+                let call = Call {
+                    args: secret_delete_args(&name, app_id),
+                    stdin: Some(SecretValue::new("y")),
+                };
+                let out = self.runner.run(&call)?;
+                if !out.success {
+                    let msg = first_line(&out.stderr).to_string();
+                    self.log
+                        .borrow_mut()
+                        .push(format!("secret delete failed: {msg}"));
+                    return Err(Error::Target(format!(
+                        "could not delete a secret made after the snapshot, so nothing was rolled back: {msg}"
+                    )));
+                }
+                self.log.borrow_mut().push("secret delete".to_string());
+            }
+        }
+        let out = self.runner.run(&call)?;
+        if !out.success {
+            let msg = first_line(&out.stderr).to_string();
+            self.log.borrow_mut().push(format!("{text} failed: {msg}"));
+            return Err(Error::Target(format!("{text} failed: {msg}")));
+        }
+        self.log.borrow_mut().push(text.to_string());
+        Ok(())
     }
 
     fn apply_step(
@@ -547,9 +662,34 @@ mod tests {
         marked: bool,
         vars: BTreeMap<String, String>,
         secrets: BTreeSet<String>,
+        /// Every version ever made: its plain settings and secret names.
+        history: Vec<(BTreeMap<String, String>, BTreeSet<String>)>,
+        /// Deployments, oldest first, each an index into `history`.
+        deployments: Vec<usize>,
         calls: Vec<String>,
         fail_stderr: Option<String>,
         fail_put_once: bool,
+        /// After this many successful changes, every call fails (the network drops).
+        drop_after: Option<usize>,
+        changes: usize,
+        /// Every call that reached the fake, successful or not (arguments only).
+        seen: Vec<Vec<String>>,
+    }
+
+    impl State {
+        /// A secret can only be changed while the newest version is the deployed one (code 10215 on a real account, 2026-11-08).
+        fn latest_is_deployed(&self) -> bool {
+            match (self.deployments.last(), self.history.len().checked_sub(1)) {
+                (Some(d), Some(last)) => *d == last,
+                _ => true,
+            }
+        }
+
+        /// A change makes a new version and deploys it, as a real Worker does (a secret put does too: checked 2026-11-08).
+        fn new_version(&mut self) {
+            self.history.push((self.vars.clone(), self.secrets.clone()));
+            self.deployments.push(self.history.len() - 1);
+        }
     }
 
     /// A pretend `wrangler` that answers in the shapes the adapter assumes.
@@ -567,6 +707,11 @@ mod tests {
         fn failing_secret_put_once() -> Self {
             let f = Self::new();
             f.0.borrow_mut().fail_put_once = true;
+            f
+        }
+        fn dropping_after(n: usize) -> Self {
+            let f = Self::new();
+            f.0.borrow_mut().drop_after = Some(n);
             f
         }
         fn failing(stderr: &str) -> Self {
@@ -594,7 +739,26 @@ mod tests {
 
     impl Runner for FakeWrangler {
         fn run(&self, call: &Call) -> Result<Output, Error> {
+            let out = self.answer(call);
+            let first = call.args.first().map(String::as_str);
+            let second = call.args.get(1).map(String::as_str);
+            let changes = matches!(first, Some("deploy" | "rollback" | "delete"))
+                || (first == Some("secret") && matches!(second, Some("put" | "delete")));
+            if changes && out.as_ref().is_ok_and(|o| o.success) {
+                let mut s = self.0.borrow_mut();
+                s.changes += 1;
+                if s.drop_after == Some(s.changes) {
+                    s.fail_stderr = Some("fetch failed: ENOTFOUND api.cloudflare.com".to_string());
+                }
+            }
+            out
+        }
+    }
+
+    impl FakeWrangler {
+        fn answer(&self, call: &Call) -> Result<Output, Error> {
             let mut s = self.0.borrow_mut();
+            s.seen.push(call.args.clone());
             if let Some(e) = &s.fail_stderr {
                 return err(e);
             }
@@ -602,16 +766,27 @@ mod tests {
             match a.as_slice() {
                 ["deployments", "list", ..] => {
                     if s.exists {
-                        ok(r#"[{"versions":[{"version_id":"v1"}]}]"#)
+                        if s.deployments.is_empty() {
+                            return ok(r#"[{"versions":[{"version_id":"a1"}]}]"#);
+                        }
+                        let list: Vec<Value> = s
+                            .deployments
+                            .iter()
+                            .map(|i| serde_json::json!({"versions":[{"version_id":format!("a{i}")}]}))
+                            .collect();
+                        ok(Value::Array(list).to_string())
                     } else {
                         err(
                             "A request to the Cloudflare API failed. Worker not found [code: 10007]",
                         )
                     }
                 }
-                ["versions", "view", ..] => {
-                    let mut bindings: Vec<Value> = s
-                        .vars
+                ["versions", "view", id, ..] => {
+                    let at = id.trim_start_matches('a').parse::<usize>().ok();
+                    let vars = at
+                        .and_then(|i| s.history.get(i))
+                        .map_or(&s.vars, |(v, _)| v);
+                    let mut bindings: Vec<Value> = vars
                         .iter()
                         .map(|(k, v)| serde_json::json!({"type":"plain_text","name":k,"text":v}))
                         .collect();
@@ -632,14 +807,19 @@ mod tests {
                     s.fail_put_once = false;
                     err("A request to the Cloudflare API failed [code: 10000]")
                 }
+                ["secret", "put" | "delete", ..] if !s.latest_is_deployed() => err(
+                    "Secret edit failed: the latest version of your Worker isn't currently deployed [code: 10215]",
+                ),
                 ["secret", "put", name, ..] => {
                     s.calls.push(format!("secret put {name}"));
                     s.secrets.insert(name.to_string());
+                    s.new_version();
                     ok("")
                 }
                 ["secret", "delete", name, ..] => {
                     s.calls.push(format!("secret delete {name}"));
                     if s.secrets.remove(*name) {
+                        s.new_version();
                         ok("")
                     } else {
                         err("Secret not found [code: 10056]")
@@ -661,6 +841,26 @@ mod tests {
                         i += 1;
                     }
                     s.calls.push("deploy".to_string());
+                    s.new_version();
+                    ok("")
+                }
+                ["rollback", id, ..] => {
+                    let at = id.trim_start_matches('a').parse::<usize>().ok();
+                    let Some(i) = at.filter(|i| *i < s.history.len()) else {
+                        return err("Version not found [code: 10211]");
+                    };
+                    // As on a real account (2026-11-08): the version's settings come back, but the Worker's secret list is not touched.
+                    s.vars = s.history[i].0.clone();
+                    s.deployments.push(i);
+                    s.calls.push("rollback".to_string());
+                    ok("")
+                }
+                ["delete", ..] => {
+                    s.calls.push("delete".to_string());
+                    *s = State {
+                        calls: std::mem::take(&mut s.calls),
+                        ..State::default()
+                    };
                     ok("")
                 }
                 other => err(&format!("unexpected call {other:?}")),
@@ -675,6 +875,7 @@ mod tests {
             Op::SetSetting,
             Op::SetSecret,
             Op::DeleteSecret,
+            Op::Restore,
         ])
     }
 
@@ -687,8 +888,8 @@ mod tests {
                 "fetch failed: ENOTFOUND api.cloudflare.com",
             )),
             Scenario::FailsLastStepOnce => target(FakeWrangler::failing_secret_put_once()),
-            // This adapter cannot restore, so the drop-after-apply check is skipped for it; the scenario still needs a target.
-            Scenario::DropsAfterApply => target(FakeWrangler::new()),
+            // Once all three steps have applied, every call fails: a rollback then must say `Unknown`, never `Restored`.
+            Scenario::DropsAfterApply => target(FakeWrangler::dropping_after(3)),
             // Secrets left untrusted: `Unverified` is not `Yes`, so a plan that needs one must be refused.
             Scenario::SecretsUnsupported => {
                 CloudflareTarget::new(FakeWrangler::new(), "worker", |_| true)
@@ -810,6 +1011,133 @@ mod tests {
         assert!(host.plan(&drop, &Config::new()).unwrap().is_empty());
         // The name stays out of the log.
         assert!(!host.target().diagnostics().contains(NAME));
+    }
+
+    fn manifest_for(setting: &str, secret: Option<&str>) -> crate::AppManifest {
+        let mut m = crate::AppManifest::new("conformance-app").setting(setting);
+        if let Some(s) = secret {
+            m = m.secret(s);
+        }
+        m
+    }
+
+    #[test]
+    fn rolling_back_returns_settings_and_secret_names_to_the_snapshot() {
+        let mut host = Host::new(target(FakeWrangler::new()));
+        let one = Config::from([("MODE".to_string(), "one".to_string())]);
+        let two = Config::from([("MODE".to_string(), "two".to_string())]);
+        let first = host.plan(&manifest_for("MODE", None), &one).unwrap();
+        host.apply_approved(&first, &first.digest(), &crate::MapSecrets::new())
+            .unwrap();
+        let second = host
+            .plan(&manifest_for("MODE", Some("TOKEN")), &two)
+            .unwrap();
+        let secrets = crate::MapSecrets::new().with("TOKEN", "CANARY-xyz");
+        let applied = host
+            .apply_approved(&second, &second.digest(), &secrets)
+            .unwrap();
+        let point = applied
+            .rollback_point
+            .expect("restore is trusted, so there is a point");
+        let seen = host.target().observe("conformance-app").unwrap();
+        assert_eq!(seen.settings.get("MODE").map(String::as_str), Some("two"));
+        assert!(seen.secret_names.contains("TOKEN"));
+        assert_eq!(host.rollback(&point), crate::Rollback::Restored);
+        let back = host.target().observe("conformance-app").unwrap();
+        assert_eq!(back.settings.get("MODE").map(String::as_str), Some("one"));
+        assert!(
+            back.secret_names.is_empty(),
+            "the secret made after the snapshot is gone"
+        );
+        assert!(!host.target().diagnostics().contains("CANARY-xyz"));
+    }
+
+    #[test]
+    fn rolling_back_a_first_deploy_deletes_only_a_worker_that_is_ours() {
+        let mut host = Host::new(target(FakeWrangler::new()));
+        let plan = host
+            .plan(
+                &manifest_for("MODE", None),
+                &Config::from([("MODE".to_string(), "x".to_string())]),
+            )
+            .unwrap();
+        let applied = host
+            .apply_approved(&plan, &plan.digest(), &crate::MapSecrets::new())
+            .unwrap();
+        let point = applied.rollback_point.unwrap();
+        assert!(!point.snapshot().existed);
+        assert_eq!(host.rollback(&point), crate::Rollback::Restored);
+        assert_eq!(
+            host.target().locate("conformance-app").unwrap(),
+            Presence::Absent
+        );
+        // A Worker that is not ours is never deleted, whatever the snapshot says.
+        let mut t = target(FakeWrangler::other_app());
+        let snap = Snapshot {
+            existed: false,
+            observed: Observed::default(),
+            handle: None,
+        };
+        assert!(matches!(
+            t.restore("conformance-app", &snap),
+            Err(Error::NotOurs { .. })
+        ));
+        assert!(
+            !t.runner.0.borrow().calls.iter().any(|c| c == "delete"),
+            "no delete was sent"
+        );
+    }
+
+    #[test]
+    fn a_version_id_that_could_be_a_flag_is_never_sent() {
+        let mut t = target(FakeWrangler::new());
+        for bad in ["--force", "a b", "", "x;rm", &"a".repeat(65)] {
+            let snap = Snapshot {
+                existed: true,
+                observed: Observed::default(),
+                handle: Some(bad.to_string()),
+            };
+            assert!(
+                matches!(t.restore("conformance-app", &snap), Err(Error::Target(_))),
+                "{bad}"
+            );
+        }
+        let none = Snapshot {
+            existed: true,
+            observed: Observed::default(),
+            handle: None,
+        };
+        assert!(t.restore("conformance-app", &none).is_err());
+        assert!(t.runner.0.borrow().seen.is_empty(), "no call was made");
+    }
+
+    #[test]
+    fn the_rollback_and_delete_calls_never_wait_for_an_answer() {
+        // Wrangler asks "are you sure"; with no terminal that would hang or abort, so both carry the flag that accepts.
+        assert!(rollback_args("abc-123", "x").contains(&"--yes".to_string()));
+        assert!(delete_worker_args("x", ".").contains(&"--force".to_string()));
+    }
+
+    #[test]
+    fn restore_is_unverified_until_trusted() {
+        let plain = CloudflareTarget::new(FakeWrangler::new(), "worker", |_| true);
+        assert_eq!(plain.supports(Op::Restore), Support::Unverified);
+        assert_eq!(
+            target(FakeWrangler::new()).supports(Op::Restore),
+            Support::Yes
+        );
+    }
+
+    #[test]
+    fn a_failed_rollback_is_an_error_and_says_so() {
+        let mut t = target(FakeWrangler::new());
+        let snap = Snapshot {
+            existed: true,
+            observed: Observed::default(),
+            handle: Some("ff".to_string()),
+        };
+        let e = t.restore("conformance-app", &snap).unwrap_err();
+        assert!(e.to_string().contains("rollback failed"), "{e}");
     }
 
     #[test]
@@ -1087,6 +1415,8 @@ compatibility_date = \"2025-01-01\"
             ("secret list", secret_list_args("some-app")),
             ("secret put", secret_name_put_args("SOME_NAME", "some-app")),
             ("secret delete", secret_delete_args("SOME_NAME", "some-app")),
+            ("rollback", rollback_args("0000-version", "some-app")),
+            ("delete", delete_worker_args("some-app", ".")),
         ] {
             let text = without_credentials(&args);
             assert!(

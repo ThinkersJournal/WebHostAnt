@@ -43,5 +43,5 @@ ran. Neither can a conformance check say "rollback works".
 ## Ruled by the PM, 2026-10-29
 
 - Keep `Unknown`: after a failed or unverifiable restore the state is genuinely unknown, and `Failed` would claim knowledge we lack. It carries a `reason` (and `details`, the names that differed, when the read-back ran).
-- Adapters that cannot snapshot declare `Op::Restore` = `No`; `Plan` then prints "this target cannot undo these changes" and `apply` returns no rollback point. The Cloudflare adapter does this until it reads a previous-version id (UNVERIFIED, D6).
+- Adapters that cannot snapshot declare `Op::Restore` = `No`; `Plan` then prints "this target cannot undo these changes" and `apply` returns no rollback point. The Cloudflare adapter now reads the deployed version id at the snapshot and rolls back to it (0.0.39; the Render adapter still declares `No`). What the Cloudflare restore does not undo: data in any store, a container's image or instances (UNVERIFIED), a secret's old value (only which names exist is checked), domain bindings.
 - Not covered here: TLS read-back, host-call timeouts. Both are separate slices.

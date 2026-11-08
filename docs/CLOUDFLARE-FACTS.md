@@ -42,7 +42,19 @@ Shapes seen: `deployments list --json` is an array of `{id, source, strategy, au
 `versions view --json` has `resources.bindings[{name, text, type}]` where a plain setting is `plain_text` and a secret is `secret_text`; `secret list --format json`
 is `[{name, type}]` (`[]` when none); a Worker that does not exist answers code 10007. All four match what `src/cloudflare.rs` assumed.
 
-Not covered: `Restore`, a container deploy, domains and `ReadTls` (they need a zone), a token (not OAuth) login, and any plan other than the free workers.dev route.
+### `Restore`, second run (same day, same Worker name, same login; account again 4 Workers, `0c269fb02b165936`, Worker deleted after)
+
+| Step | Result |
+|---|---|
+| First deploy, then roll back (`--rollback-after`) | the Worker this apply created is deleted (`wrangler delete --force`); `deployments list` answers 10007 again; the read-back says the target matches the snapshot |
+| Create, then apply a setting and a secret, then roll back | settings back to the snapshot; the secret made after it gone; the read-back matches |
+
+Two behaviours the first attempt found (both now handled in `restore`, both pinned by the fake wrangler): (1) `wrangler rollback` puts the version's settings back but
+does NOT touch the Worker's secret list, so a secret made after the snapshot stays; (2) once rolled back, the newest *uploaded* version is no longer the *deployed* one, and Cloudflare then refuses
+any secret change (`secret delete` fails with code 10215: "the latest version of your Worker isn't currently deployed"). So the secrets the snapshot did not have are deleted BEFORE the rollback.
+A secret that existed at the snapshot and was deleted since cannot come back (its value is gone); it shows as a difference in the read-back.
+
+Not covered: a container deploy, domains and `ReadTls` (they need a zone), a token (not OAuth) login, and any plan other than the free workers.dev route.
 
 ## Workers custom-domains REST API (read 2026-10-31 from Cloudflare's published OpenAPI schema)
 
