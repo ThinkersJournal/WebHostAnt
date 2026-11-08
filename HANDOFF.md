@@ -34,13 +34,13 @@ exist (all other Ants are 0.0.0 placeholders: stub behind a trait and say so). O
 PM allocates at gate). Memory rule: CARGO_BUILD_JOBS=2, one build at a time. Repos: ThinkersJournal/WebHostAnt, crate `webhostant` 0.0.0 published.
 
 ## FIRST ON NEXT START
-Relaunch pins `--model sonnet`. Reply on the channel a message arrived on. Synapse: my session was dropped by the 2026-10-30 restart; the PM said do NOT re-claim (the Synapse lane diagnoses); use claude-peers (PM = cwd `C:\Projects`, id changes on restart: list_peers).
+Relaunch pins `--model sonnet`. Read C:\Projects\THROTTLE.md first. Channel: Synapse only (`pm@ciresnave`); my session was dropped by the 2026-10-30 restart, PM said do NOT re-claim. Do not loop on GitHub PR status.
 
-## State (2026-10-31)
-main = ccfc7c2 (0.0.28). No open PR, no extra worktrees. Merged this session: #23 HealthProbe (0.0.24), #24 Cloudflare domains REST facts + RELEASE-CHECKLIST (0.0.25), #25 BindDomain over REST (0.0.26), #26 ReadTls from certificate packs (0.0.27), #27 ConfigurAnt projection, feature `configurant` (0.0.28; CI now --all-features). All REST shapes are from Cloudflare's published OpenAPI schema (docs/CLOUDFLARE-FACTS.md), NOT live answers.
-Channel: **Synapse only** (CireSnave ordered claude-peers out 2026-10-31); PM role `pm@ciresnave`. GitHub GraphQL budget was exhausted until 16:53Z 2026-10-31: do not loop on PR status.
-**Next:** PM said take row 3 further: the second host adapter's read-only parts (no token) is open but the second host is not ruled (Cloudflare is the only ruled target): [ASK] sent, wait for the answer. Cloudflare rows that need the real token wait for D6 (CireSnave): run RELEASE-CHECKLIST.md by hand before a release touching cloudflare.rs.
-Other waits: D7 ConfigurAnt question flow, D8 ReleaseAnt. Local serving/TLS waits for WebServAnt (0.0.0). Unbind: wait-for-consumer. Idea not asked: log "pushed N secrets" (count).
+## State (2026-11-08)
+PM TASK 2026-11-08 (CireSnave: "Yes, go ahead and get WebHostAnt started on the Cloudflare path."): ROADMAP rows C1-C8 written; build them one PR each, C1 first.
+main = 840836e (0.0.31). PR `cf-roadmap` (0.0.32, docs) open from worktree `../WebHostAnt-wt-cf-roadmap`; remove worktree+branch when merged.
+Asked `humboldt` for demo-deploy-steps.md (not on origin/main); read `.lane-state/humboldt-demo-deploy*.ps1/.out` meanwhile. No [ASK] to PM: D6-D8 do not block C1-C4.
+No WAIT lines. Render slice 3 (`Restore` via rollback + `ReadTls`) stays held behind the Cloudflare rows.
+Render test account needs (do NOT ask; PM puts on board 320 next to D6): dedicated workspace + API key + workspace id + public test image. Cloudflare real-token rows wait for D6: run `docs/RELEASE-CHECKLIST.md` by hand before releases touching cloudflare.rs. D7, D8, local serving/TLS (WebServAnt 0.0.0) still wait.
 
-Docs: `docs/TLS-NEED-LIST.md`, `docs/HTTPS-CLIENT-NEEDS.md` (both sent to httpant). Rulings: Cloudflare only first; secrets pushed (paste fallback); presence = host API then authenticated config retrieval, no unauthenticated tier. See ROADMAP.md, docs/CONSUMER-CONTRACT.md.
-Gotchas: files are CRLF-in-worktree/LF-in-blob; scripted replaces must assert count==1. Use a worktree, never switch the primary. On Windows `wrangler` is a `.cmd` shim. Tests that print argv trip CodeQL cleartext-logging: print fixed labels.
+Docs: `docs/SECOND-HOST.md`, `docs/TLS-NEED-LIST.md`, `docs/HTTPS-CLIENT-NEEDS.md`, `docs/CONSUMER-CONTRACT.md`, ROADMAP.md. Gotchas: CRLF-in-worktree/LF-in-blob (scripted replaces assert count==1); worktree, never switch the primary; `wrangler` is a `.cmd` shim; tests must print fixed labels (CodeQL); `supertool` untracked, leave alone; this HANDOFF is an uncommitted local edit (commit with the next PR).
