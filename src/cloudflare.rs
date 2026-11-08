@@ -72,16 +72,18 @@ pub trait Runner {
 /// How long one `wrangler` call may run before it is stopped. Generous because a container deploy builds an image.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// Runs `wrangler` from the `PATH`, stopping any call that outlives its time limit.
+/// Runs `wrangler` (or another program, see [`ProcessRunner::program`]) from the `PATH`, stopping any call that outlives its time limit.
 #[derive(Debug, Clone)]
 pub struct ProcessRunner {
     timeout: Duration,
+    program: &'static str,
 }
 
 impl Default for ProcessRunner {
     fn default() -> Self {
         Self {
             timeout: DEFAULT_TIMEOUT,
+            program: "wrangler",
         }
     }
 }
@@ -89,7 +91,15 @@ impl Default for ProcessRunner {
 impl ProcessRunner {
     /// A runner that stops each call after `timeout`.
     pub fn with_timeout(timeout: Duration) -> Self {
-        Self { timeout }
+        Self {
+            timeout,
+            ..Self::default()
+        }
+    }
+
+    /// A runner for another program found the same way (the preflight runs `docker` through one). The name is a fixed string, never input.
+    pub fn program(program: &'static str, timeout: Duration) -> Self {
+        Self { timeout, program }
     }
 }
 
@@ -98,10 +108,10 @@ impl Runner for ProcessRunner {
         // On Windows `wrangler` is a `.cmd` shim, which `CreateProcess` will not find by bare name.
         let mut cmd = if cfg!(windows) {
             let mut c = Command::new("cmd");
-            c.args(["/C", "wrangler"]);
+            c.args(["/C", self.program]);
             c
         } else {
-            Command::new("wrangler")
+            Command::new(self.program)
         };
         cmd.args(&call.args);
         run_bounded(cmd, call.stdin.as_ref(), self.timeout, &call.describe())
