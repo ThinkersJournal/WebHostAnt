@@ -24,6 +24,26 @@ project's own Wrangler config (the consumer owns that file), or it calls the RES
 which waits for HTTPAnt). `supports(BindDomain)` and `ReadTls` stay `No`/`Unverified` for Cloudflare until one is chosen. Asked of the PM.
 
 
+## Recorded from a real account (2026-11-08, `wrangler` 4.141.0, one throwaway Worker, by hand)
+
+PM-approved run (board 320, D6 option "by hand"): `examples/deploy.rs` on a new Worker `webhostant-check` (no container, no data, a dummy secret value that is not
+a secret), under the PM's wrangler login. The account's Workers were counted and fingerprinted before and after (4, `0c269fb02b165936`, both times); the throwaway
+Worker was deleted (`wrangler delete`) and `deployments list` then answered code 10007 again. Shapes only; no values, email or account id were recorded.
+
+| Step | What ran | Result |
+|---|---|---|
+| Nothing trusted | the example with no `--trust` | plan refused (`Unsupported`), as the conformance suite requires |
+| `Create` | `wrangler deploy --name ... --keep-vars --var WEBHOSTANT_APP:...` | applied; read back healthy |
+| `SetSetting` | the same with `--var NAME:value` | applied; the value read back |
+| `SetSecret` | `wrangler secret put` (value on stdin) | applied; the name read back, not the value |
+| `DeleteSecret` | `wrangler secret delete` (`y` on stdin) | applied non-interactively; the name gone on read back |
+
+Shapes seen: `deployments list --json` is an array of `{id, source, strategy, author_email, annotations{...}, versions[{version_id, percentage}], created_on}`;
+`versions view --json` has `resources.bindings[{name, text, type}]` where a plain setting is `plain_text` and a secret is `secret_text`; `secret list --format json`
+is `[{name, type}]` (`[]` when none); a Worker that does not exist answers code 10007. All four match what `src/cloudflare.rs` assumed.
+
+Not covered: `Restore`, a container deploy, domains and `ReadTls` (they need a zone), a token (not OAuth) login, and any plan other than the free workers.dev route.
+
 ## Workers custom-domains REST API (read 2026-10-31 from Cloudflare's published OpenAPI schema)
 
 Source: `https://raw.githubusercontent.com/cloudflare/api-schemas/main/openapi.json` (the file Cloudflare publishes its API reference from), read by
