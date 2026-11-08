@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.35] - 2026-11-08
+
+- Cloudflare path row C3, readiness (stacked on 0.0.34): `wait_until_healthy`, `HealthProbe::wait` and `into_waiting_probe`, with `WaitPolicy` (default 10 minutes, every 15 seconds, from Humboldt's 2026-11-08 demo) and `Waited` (every answer in order, so a failure says what the app said). It asks at least once, stops at once on healthy, never retries a `Refused` (the private-address guard), and never sleeps past the deadline. `CloudflareTarget::with_ready_wait` waits after `Create` and each `SetSetting` deploy and fails that step if the app does not come up, so the failed apply carries its rollback point; planning and read-back keep the plain probe. Also pinned by a test: a notice on stderr with exit 0 is a success (only the exit code decides; the demo's PowerShell script read an npm notice as an error). The Windows `cmd /C wrangler` path was already in `ProcessRunner`. Mutations (retry a refusal; ignore the deadline; sleep after success; wait after a secret put; stderr decides) each fail a test. Not breaking. Version provisional; the PM allocates.
+
 ## [0.0.34] - 2026-11-08
 
 - Cloudflare path row C2: `EnvSecrets`, a `Secrets` source that reads named environment variables, which is how Humboldt's 2026-11-08 demo deploy delivered `DATABASE_URL` (a tool exports it to one process). A secret reads the variable of its own name, or another via `EnvSecrets::var`; an unset, empty or non-text variable gives no value (an empty secret is never sent), so `apply` still stops with `MissingSecret` before changing anything. `with_lookup` replaces the environment for tests. Its `Debug` shows mapped names, never a value. Mutations (empty value passed through; mapping ignored) fail tests. Not breaking: new public type. Version provisional; the PM allocates.
