@@ -43,7 +43,7 @@ The six criteria are DESIGN.md section 3.1's. "Read" means I read it from the so
 * **Render is buildable through the pieces we already have.** The `Rest` trait and `HttpRest` from the Cloudflare domain work send a bearer-token call through HTTPAnt's client with the
   private-address guard on and redirects off; a Render adapter is another user of them. The marker that says "this service is ours" can be a plain variable, as with Cloudflare's `WEBHOSTANT_APP`.
 * **What does not map cleanly:** Render has no certificate-expiry field, so `ReadTls` would report the name and verification status and leave expiry unknown (it stays `Unverified` or
-  `No`, never made up). Restore maps to `POST /services/{id}/rollback`, which is a real call, but whether it also restores variables is **UNVERIFIED**.
+  `No`, never made up). Restore maps to `POST /services/{id}/rollback`, which is a real call, but whether it also restores variables is **UNVERIFIED**; since 0.0.41 the adapter rolls back to the deploy that was live at the snapshot and then always reconciles the variables itself (against a fake; no Render account yet). `ReadTls` reports verified domain names only (no expiry in Render's schema).
 * **A test account might be free.** The `plan` field accepts `free` for a web service. Whether a *free* service can run an image, and how it behaves when it sleeps during a test, is **UNVERIFIED**.
   If it works, this host could be the first one with real-target tests running in CI without waiting for CireSnave's D6 decision.
 

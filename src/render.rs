@@ -469,6 +469,58 @@ impl<R: Rest> RenderApi<R> {
         Self::deploy_of(&answer)
             .ok_or_else(|| Error::Target("the rollback answer has no deploy id".to_string()))
     }
+
+    /// The deploy that is live now, if there is one (`GET /services/{id}/deploys?status=live&limit=1`). A deploy in the answer that is not live is an
+    /// error, never taken for the live one. Shape from the published schema, **UNVERIFIED** against a real account.
+    pub fn live_deploy(&self, service_id: &str) -> Result<Option<Deploy>, Error> {
+        plain_id("service id", service_id)?;
+        let body = self.get(
+            format!("/services/{service_id}/deploys"),
+            vec![
+                ("status".into(), "live".into()),
+                ("limit".into(), "1".into()),
+            ],
+        )?;
+        let items = body
+            .as_array()
+            .ok_or_else(|| Error::Target("the deploy list is not an array".to_string()))?;
+        let Some(first) = items.first() else {
+            return Ok(None);
+        };
+        let deploy = Self::deploy_of(first)
+            .ok_or_else(|| Error::Target("a deploy in the list lacks id or status".to_string()))?;
+        if !deploy.status.is_live() {
+            return Err(Error::Target(
+                "the list of live deploys held one that is not live".to_string(),
+            ));
+        }
+        Ok(Some(deploy))
+    }
+
+    /// Delete a service (`DELETE /services/{id}`). Destructive and not undoable: the adapter calls it only to remove a service its own apply created.
+    pub fn delete_service(&self, service_id: &str) -> Result<(), Error> {
+        plain_id("service id", service_id)?;
+        self.call(RestCall {
+            method: Method::Delete,
+            path: format!("/services/{service_id}"),
+            query: Vec::new(),
+            body: None,
+        })
+        .map(|_| ())
+    }
+
+    /// Delete one variable (`DELETE /services/{id}/env-vars/{key}`). The path is from the published schema, **UNVERIFIED** against a real account.
+    pub fn delete_env_var(&self, service_id: &str, key: &str) -> Result<(), Error> {
+        plain_id("service id", service_id)?;
+        plain_id("variable name", key)?;
+        self.call(RestCall {
+            method: Method::Delete,
+            path: format!("/services/{service_id}/env-vars/{key}"),
+            query: Vec::new(),
+            body: None,
+        })
+        .map(|_| ())
+    }
 }
 
 #[cfg(test)]
@@ -489,6 +541,8 @@ pub(crate) mod tests {
         calls: RefCell<Vec<RestCall>>,
         force: RefCell<Option<RestAnswer>>,
         pad_services: usize,
+        /// What `GET .../deploys?status=live` answers: (deploy id, status).
+        live_deploys: RefCell<Vec<(String, String)>>,
     }
 
     fn json_answer(status: u16, v: Value) -> Result<RestAnswer, Error> {
@@ -601,6 +655,21 @@ pub(crate) mod tests {
                         json!({"id": "dep-2", "status": "created", "trigger": "api"}),
                     )
                 }
+                (Method::Get, x) if x.ends_with("/deploys") => {
+                    let rows: Vec<Value> = self
+                        .live_deploys
+                        .borrow()
+                        .iter()
+                        .map(|(id, status)| json!({"deploy": {"id": id, "status": status}, "cursor": "c"}))
+                        .collect();
+                    json_answer(200, Value::Array(rows))
+                }
+                (Method::Delete, x) if x.contains("/env-vars/") => {
+                    let key = x.rsplit('/').next().unwrap();
+                    self.vars.borrow_mut().remove(key);
+                    json_answer(204, Value::Null)
+                }
+                (Method::Delete, x) if x.matches('/').count() == 2 => json_answer(204, Value::Null),
                 (Method::Get, x) if x.contains("/deploys/") => {
                     let id = x.rsplit('/').next().unwrap();
                     let status = self.deploy_status.borrow().clone();
@@ -861,6 +930,56 @@ pub(crate) mod tests {
         let calls = a.rest.calls.borrow();
         assert_eq!(calls[0].path, "/services/srv-1/rollback");
         assert_eq!(calls[0].body.as_deref(), Some(r#"{"deployId":"dep-1"}"#));
+    }
+
+    #[test]
+    fn the_live_deploy_is_read_and_a_deploy_that_is_not_live_is_never_taken_for_it() {
+        let f = FakeRender::default();
+        f.live_deploys
+            .borrow_mut()
+            .push(("dep-7".to_string(), "live".to_string()));
+        let a = api(f);
+        let d = a.live_deploy("srv-1").unwrap().unwrap();
+        assert_eq!(d.id, "dep-7");
+        let calls = a.rest.calls.borrow();
+        assert_eq!(calls[0].path, "/services/srv-1/deploys");
+        assert!(
+            calls[0]
+                .query
+                .contains(&("status".to_string(), "live".to_string()))
+        );
+        drop(calls);
+        assert_eq!(
+            api(FakeRender::default()).live_deploy("srv-1").unwrap(),
+            None
+        );
+        let f = FakeRender::default();
+        f.live_deploys
+            .borrow_mut()
+            .push(("dep-8".to_string(), "build_in_progress".to_string()));
+        assert!(api(f).live_deploy("srv-1").is_err());
+    }
+
+    #[test]
+    fn deleting_a_service_or_a_variable_uses_delete_on_the_right_path_and_checks_the_ids() {
+        let f = FakeRender::default();
+        f.vars.borrow_mut().insert("K".to_string(), "v".to_string());
+        let a = api(f);
+        a.delete_env_var("srv-1", "K").unwrap();
+        a.delete_service("srv-1").unwrap();
+        let calls = a.rest.calls.borrow();
+        assert_eq!(
+            (calls[0].method, calls[0].path.as_str()),
+            (Method::Delete, "/services/srv-1/env-vars/K")
+        );
+        assert_eq!(
+            (calls[1].method, calls[1].path.as_str()),
+            (Method::Delete, "/services/srv-1")
+        );
+        drop(calls);
+        assert!(a.rest.vars.borrow().is_empty());
+        assert!(a.delete_service("srv-1/../x").is_err());
+        assert!(a.delete_env_var("srv-1", "A/B").is_err());
     }
 
     #[test]

@@ -1,8 +1,9 @@
 //! The Render adapter: a [`Target`] that drives Render's REST API through [`RenderApi`].
 //!
 //! **Unverified against a real account.** Shapes are from Render's published OpenAPI file (`docs/SECOND-HOST.md`); no Render account exists for us yet.
-//! So every operation reports [`Support::Unverified`] until the caller opts in with [`RenderTarget::trust_operations`]. `Restore` and `ReadTls` are
-//! `No` in this slice.
+//! So every operation reports [`Support::Unverified`] until the caller opts in with [`RenderTarget::trust_operations`]. `Restore` rolls back to the
+//! deploy that was live at the snapshot and reconciles the variables; `ReadTls` reports the verified domain names and no expiry (Render's schema has
+//! none). `DeleteSecret` is `No`.
 //!
 //! **Loud limitation: [`SECRET_LIMITATION`].** On Render a secret is an ordinary environment variable that the API may show to any holder of the
 //! API key; use a dedicated workspace and key.
@@ -23,7 +24,9 @@ use std::time::Duration;
 use crate::cloudflare::MARKER;
 use crate::cloudflare_domains::Rest;
 use crate::render::{DeployStatus, RenderApi};
-use crate::{Error, Observed, Op, Presence, SecretValue, Step, Support, Target};
+use crate::{
+    Error, Observed, Op, Presence, Renewal, SecretValue, Snapshot, Step, Support, Target, TlsStatus,
+};
 
 /// What anyone using this adapter for secrets must be told. [`RenderTarget::help`] returns it.
 pub const SECRET_LIMITATION: &str = "on Render a secret is an ordinary environment variable that the API may show to any holder of the API key; use a dedicated workspace and key";
@@ -198,7 +201,7 @@ impl<R: Rest> Target for RenderTarget<R> {
 
     fn supports(&self, op: Op) -> Support {
         match op {
-            Op::Restore | Op::ReadTls | Op::DeleteSecret => Support::No,
+            Op::DeleteSecret => Support::No,
             _ if self.trusted.contains(&op) => Support::Yes,
             _ => Support::Unverified,
         }
@@ -310,6 +313,133 @@ impl<R: Rest> Target for RenderTarget<R> {
         }
     }
 
+    fn snapshot(&self, app_id: &str) -> Result<Snapshot, Error> {
+        match self.service_and_vars(app_id)? {
+            None => Ok(Snapshot {
+                existed: false,
+                observed: Observed::default(),
+                handle: None,
+            }),
+            Some((service, vars)) if vars.get(MARKER).map(String::as_str) == Some(app_id) => {
+                Ok(Snapshot {
+                    existed: true,
+                    observed: self.observe(app_id)?,
+                    // The deploy that is live now: what `restore` rolls back to.
+                    handle: self.api.live_deploy(&service.id)?.map(|d| d.id),
+                })
+            }
+            Some(_) => Err(Error::NotOurs {
+                app: app_id.to_string(),
+            }),
+        }
+    }
+
+    /// Put the service back to the deploy that was live at the snapshot (`POST /services/{id}/rollback`), then make its variables match the snapshot,
+    /// or, when it did not exist then, delete the service this apply created (never one the marker does not show to be ours).
+    ///
+    /// Whether Render's rollback restores variables is **UNVERIFIED**, so the variables are always reconciled afterwards: a setting is put back to its
+    /// snapshot value, a variable made after the snapshot is deleted, and the secret-names variable is put back. A secret that existed then and is gone
+    /// now cannot come back (its value is unknown), and one overwritten since keeps the new value; both show up as differences in the read-back.
+    /// What is NOT undone: data in any database or disk the service uses, and the custom domains attached since.
+    fn restore(&mut self, app_id: &str, snapshot: &Snapshot) -> Result<(), Error> {
+        let Some((service, vars)) = self.service_and_vars(app_id)? else {
+            return if snapshot.existed {
+                Err(Error::Target(
+                    "the app is not deployed, so there is nothing to roll back".to_string(),
+                ))
+            } else {
+                Ok(())
+            };
+        };
+        if vars.get(MARKER).map(String::as_str) != Some(app_id) {
+            return Err(Error::NotOurs {
+                app: app_id.to_string(),
+            });
+        }
+        if !snapshot.existed {
+            self.api.delete_service(&service.id)?;
+            self.note("delete service");
+            return Ok(());
+        }
+        let Some(deploy) = snapshot.handle.as_deref() else {
+            return Err(Error::Target(
+                "the snapshot has no live deploy to roll back to".to_string(),
+            ));
+        };
+        let started = self.api.rollback(&service.id, deploy)?;
+        self.note("rollback");
+        self.wait_live(&service.id, &started.id)?;
+
+        let vars = self.api.env_vars(&service.id)?;
+        let mut changed = false;
+        for (key, value) in &snapshot.observed.settings {
+            if vars.get(key) != Some(value) {
+                self.api.put_env_var(&service.id, key, value)?;
+                changed = true;
+            }
+        }
+        for key in vars.keys() {
+            let wanted = key == MARKER
+                || key == SECRETS_MARKER
+                || snapshot.observed.settings.contains_key(key)
+                || snapshot.observed.secret_names.contains(key);
+            if !wanted {
+                self.api.delete_env_var(&service.id, key)?;
+                changed = true;
+            }
+        }
+        let want_list = snapshot
+            .observed
+            .secret_names
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(",");
+        match (want_list.is_empty(), vars.get(SECRETS_MARKER)) {
+            (true, Some(_)) => {
+                self.api.delete_env_var(&service.id, SECRETS_MARKER)?;
+                changed = true;
+            }
+            (false, have) if have != Some(&want_list) => {
+                self.api
+                    .put_env_var(&service.id, SECRETS_MARKER, &want_list)?;
+                changed = true;
+            }
+            _ => {}
+        }
+        if changed {
+            self.redeploy(&service.id)?;
+            self.note("restored variables");
+        }
+        Ok(())
+    }
+
+    /// The names Render reports as verified. Render creates and renews certificates itself for verified domains, and its domain schema carries no
+    /// expiry or issuer, so those stay unset and the renewal is `Unknown`; a name that is not verified yet is left out (it has no certificate).
+    fn tls_status(&self, app_id: &str) -> Result<TlsStatus, Error> {
+        let (service, vars) = self
+            .service_and_vars(app_id)?
+            .ok_or_else(|| Error::Target("the app is not deployed".to_string()))?;
+        if vars.get(MARKER).map(String::as_str) != Some(app_id) {
+            return Err(Error::NotOurs {
+                app: app_id.to_string(),
+            });
+        }
+        let names = self
+            .api
+            .custom_domains(&service.id)?
+            .into_iter()
+            .filter(|d| d.verified)
+            .map(|d| d.name)
+            .collect();
+        Ok(TlsStatus {
+            names,
+            not_after: None,
+            issuer: None,
+            last_renewal: Renewal::Unknown,
+        })
+    }
+
     fn diagnostics(&self) -> String {
         self.log.borrow().join("\n")
     }
@@ -353,6 +483,15 @@ mod tests {
         deploy_ends_as: RefCell<Option<String>>,
         never_live: Cell<bool>,
         calls: RefCell<Vec<RestCall>>,
+        /// The live deploy of each service (set when a deploy is read as live).
+        live: RefCell<BTreeMap<String, String>>,
+        /// The deploy ids rolled back to, in order.
+        rolled_back_to: RefCell<Vec<String>>,
+        /// Domain names Render has verified.
+        verified: RefCell<std::collections::BTreeSet<String>>,
+        /// After this many changing calls (POST, PUT, DELETE) every call fails: the network drops.
+        drop_after_changes: Cell<Option<usize>>,
+        changes: Cell<usize>,
     }
 
     fn json_answer(status: u16, v: Value) -> Result<RestAnswer, Error> {
@@ -376,6 +515,11 @@ mod tests {
             s.down.set(true);
             s
         }
+        fn dropping_after(changes: usize) -> Self {
+            let s = Self::default();
+            s.drop_after_changes.set(Some(changes));
+            s
+        }
         fn new_deploy(&self) -> String {
             let n = self.next_deploy.get() + 1;
             self.next_deploy.set(n);
@@ -391,6 +535,11 @@ mod tests {
     impl Rest for Server {
         fn send(&self, call: &RestCall) -> Result<RestAnswer, Error> {
             self.calls.borrow_mut().push(call.clone());
+            if let Some(n) = self.drop_after_changes.get()
+                && self.changes.get() >= n
+            {
+                self.down.set(true);
+            }
             if self.down.get() {
                 return Err(Error::Target("could not reach Render: send".to_string()));
             }
@@ -399,6 +548,9 @@ mod tests {
                 .as_ref()
                 .map(|b| serde_json::from_str(b).unwrap())
                 .unwrap_or(Value::Null);
+            if call.method != Method::Get {
+                self.changes.set(self.changes.get() + 1);
+            }
             let p = call.path.as_str();
             match (call.method, p) {
                 (Method::Get, "/services") => {
@@ -468,7 +620,10 @@ mod tests {
                         .borrow()
                         .iter()
                         .filter(|(s, _)| *s == sid)
-                        .map(|(_, n)| json!({"customDomain": {"id": format!("cdm-{n}"), "name": n, "verificationStatus": "unverified"}, "cursor": "c"}))
+                        .map(|(_, n)| {
+                            let status = if self.verified.borrow().contains(n) { "verified" } else { "unverified" };
+                            json!({"customDomain": {"id": format!("cdm-{n}"), "name": n, "verificationStatus": status}, "cursor": "c"})
+                        })
                         .collect();
                     json_answer(200, Value::Array(rows))
                 }
@@ -482,6 +637,41 @@ mod tests {
                 }
                 (Method::Post, x) if x.ends_with("/deploys") => {
                     json_answer(201, json!({"id": self.new_deploy(), "status": "created"}))
+                }
+                // The fake's rollback leaves the variables as they are, the conservative reading of what is UNVERIFIED about Render.
+                (Method::Post, x) if x.ends_with("/rollback") => {
+                    self.rolled_back_to
+                        .borrow_mut()
+                        .push(body["deployId"].as_str().unwrap().to_string());
+                    json_answer(201, json!({"id": self.new_deploy(), "status": "created"}))
+                }
+                (Method::Get, x) if x.ends_with("/deploys") => {
+                    let sid = Self::sid(x);
+                    let rows: Vec<Value> = self
+                        .live
+                        .borrow()
+                        .get(&sid)
+                        .map(|id| {
+                            vec![json!({"deploy": {"id": id, "status": "live"}, "cursor": "c"})]
+                        })
+                        .unwrap_or_default();
+                    json_answer(200, Value::Array(rows))
+                }
+                (Method::Delete, x) if x.contains("/env-vars/") => {
+                    let sid = Self::sid(x);
+                    let key = x.rsplit('/').next().unwrap().to_string();
+                    if let Some(v) = self.vars.borrow_mut().get_mut(&sid) {
+                        v.remove(&key);
+                    }
+                    json_answer(204, Value::Null)
+                }
+                (Method::Delete, x) if x.matches('/').count() == 2 => {
+                    let sid = Self::sid(x);
+                    self.services.borrow_mut().retain(|(i, _)| *i != sid);
+                    self.vars.borrow_mut().remove(&sid);
+                    self.domains.borrow_mut().retain(|(s, _)| *s != sid);
+                    self.live.borrow_mut().remove(&sid);
+                    json_answer(204, Value::Null)
                 }
                 (Method::Get, x) if x.contains("/deploys/") => {
                     let id = x.rsplit('/').next().unwrap().to_string();
@@ -497,6 +687,7 @@ mod tests {
                             "build_in_progress".into()
                         }
                     } else if *reads >= 2 {
+                        self.live.borrow_mut().insert(Self::sid(x), id.clone());
                         "live".into()
                     } else {
                         "build_in_progress".into()
@@ -512,13 +703,22 @@ mod tests {
         let api = RenderApi::new(s, OWNER).unwrap();
         RenderTarget::new(api, "docker.io/org/app:1", "starter", "/health", |_| true)
             .with_pacing(Pacing::with_pause(5, || {}))
-            .trust_operations(&[Op::Create, Op::SetSetting, Op::SetSecret, Op::BindDomain])
+            .trust_operations(&[
+                Op::Create,
+                Op::SetSetting,
+                Op::SetSecret,
+                Op::BindDomain,
+                Op::Restore,
+                Op::ReadTls,
+            ])
     }
 
     #[test]
     fn the_conformance_suite_passes_against_the_fake_render() {
         let failures = conformance::run(|scenario| match scenario {
-            Scenario::Empty | Scenario::DropsAfterApply => target(Server::default()),
+            Scenario::Empty => target(Server::default()),
+            // The suite's plan makes six changing calls (create 1, setting 2, secret 3); after the sixth the network drops.
+            Scenario::DropsAfterApply => target(Server::dropping_after(6)),
             Scenario::HoldsOtherApp => target(Server::holding_other_app()),
             Scenario::Unreachable => target(Server::down()),
             Scenario::FailsLastStepOnce => {
@@ -548,11 +748,157 @@ mod tests {
         ));
     }
 
+    fn host_of(s: Server) -> crate::Host<RenderTarget<Server>> {
+        crate::Host::new(target(s))
+    }
+
+    fn cfg(pairs: &[(&str, &str)]) -> crate::Config {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
     #[test]
-    fn restore_and_read_tls_are_not_claimed() {
-        let t = target(Server::default());
-        assert_eq!(t.supports(Op::Restore), Support::No);
-        assert_eq!(t.supports(Op::ReadTls), Support::No);
+    fn restore_and_read_tls_are_unverified_until_trusted_and_delete_secret_is_not_claimed() {
+        let api = RenderApi::new(Server::default(), OWNER).unwrap();
+        let plain = RenderTarget::new(api, "i", "starter", "/health", |_| true);
+        assert_eq!(plain.supports(Op::Restore), Support::Unverified);
+        assert_eq!(plain.supports(Op::ReadTls), Support::Unverified);
+        assert_eq!(plain.supports(Op::DeleteSecret), Support::No);
+        assert_eq!(
+            target(Server::default()).supports(Op::Restore),
+            Support::Yes
+        );
+        assert_eq!(
+            target(Server::default()).supports(Op::ReadTls),
+            Support::Yes
+        );
+    }
+
+    #[test]
+    fn rolling_back_goes_to_the_deploy_live_at_the_snapshot_and_puts_variables_back() {
+        let mut host = host_of(Server::default());
+        let m1 = crate::AppManifest::new("my-app").setting("MODE");
+        let first = host.plan(&m1, &cfg(&[("MODE", "one")])).unwrap();
+        host.apply_approved(&first, &first.digest(), &crate::MapSecrets::new())
+            .unwrap();
+        let live_then = host.target().api.rest_for_test().live.borrow()["srv-1"].clone();
+
+        let m2 = crate::AppManifest::new("my-app")
+            .setting("MODE")
+            .setting("EXTRA")
+            .secret("TOKEN");
+        let second = host
+            .plan(&m2, &cfg(&[("MODE", "two"), ("EXTRA", "x")]))
+            .unwrap();
+        let secrets = crate::MapSecrets::new().with("TOKEN", "CANARY-render-xyz");
+        let applied = host
+            .apply_approved(&second, &second.digest(), &secrets)
+            .unwrap();
+        let point = applied.rollback_point.expect("restore is trusted");
+        assert_eq!(host.rollback(&point), crate::Rollback::Restored);
+
+        let back = host.target().observe("my-app").unwrap();
+        assert_eq!(back.settings, cfg(&[("MODE", "one")]));
+        assert!(
+            back.secret_names.is_empty(),
+            "the secret made later is gone"
+        );
+        let to = host
+            .target()
+            .api
+            .rest_for_test()
+            .rolled_back_to
+            .borrow()
+            .clone();
+        assert_eq!(
+            to,
+            [live_then],
+            "rolled back to the deploy live at the snapshot"
+        );
+        let vars = host.target().api.rest_for_test().vars.borrow()["srv-1"].clone();
+        assert!(
+            !vars.contains_key(SECRETS_MARKER),
+            "the secret-names variable is put back"
+        );
+        assert!(!host.target().diagnostics().contains("CANARY-render-xyz"));
+    }
+
+    #[test]
+    fn rolling_back_a_first_deploy_deletes_only_a_service_that_is_ours() {
+        let mut host = host_of(Server::default());
+        let m = crate::AppManifest::new("my-app").setting("MODE");
+        let plan = host.plan(&m, &cfg(&[("MODE", "x")])).unwrap();
+        let applied = host
+            .apply_approved(&plan, &plan.digest(), &crate::MapSecrets::new())
+            .unwrap();
+        let point = applied.rollback_point.unwrap();
+        assert!(!point.snapshot().existed);
+        assert_eq!(host.rollback(&point), crate::Rollback::Restored);
+        assert_eq!(host.target().locate("my-app").unwrap(), Presence::Absent);
+
+        // A service that is not ours is never deleted, whatever the snapshot says.
+        let mut t = target(Server::holding_other_app());
+        let snap = crate::Snapshot {
+            existed: false,
+            observed: Observed::default(),
+            handle: None,
+        };
+        assert!(matches!(
+            t.restore("conformance-app", &snap),
+            Err(Error::NotOurs { .. })
+        ));
+        let calls = t.api.rest_for_test().calls.borrow();
+        assert!(
+            calls.iter().all(|c| c.method != Method::Delete),
+            "no delete was sent"
+        );
+    }
+
+    #[test]
+    fn a_snapshot_without_a_live_deploy_cannot_be_rolled_back() {
+        let mut t = deployed();
+        let snap = crate::Snapshot {
+            existed: true,
+            observed: Observed::default(),
+            handle: None,
+        };
+        assert!(t.restore("my-app", &snap).is_err());
+        assert!(t.api.rest_for_test().rolled_back_to.borrow().is_empty());
+    }
+
+    #[test]
+    fn read_tls_names_only_verified_domains_and_never_invents_an_expiry() {
+        let s = Server::default();
+        let mut t = target(s);
+        t.apply_step("my-app", &Step::Create, None).unwrap();
+        for name in ["a.example.org", "b.example.org"] {
+            t.apply_step("my-app", &Step::BindDomain { name: name.into() }, None)
+                .unwrap();
+        }
+        t.api
+            .rest_for_test()
+            .verified
+            .borrow_mut()
+            .insert("a.example.org".to_string());
+        let status = t.tls_status("my-app").unwrap();
+        assert_eq!(
+            status.names,
+            ["a.example.org"],
+            "an unverified name has no certificate yet"
+        );
+        assert_eq!((status.not_after, status.issuer), (None, None));
+        assert_eq!(status.last_renewal, crate::Renewal::Unknown);
+        assert!(matches!(
+            target(Server::holding_other_app()).tls_status("conformance-app"),
+            Err(Error::NotOurs { .. })
+        ));
+        assert!(
+            target(Server::default())
+                .tls_status("nothing-here")
+                .is_err()
+        );
     }
 
     #[test]
