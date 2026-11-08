@@ -1,8 +1,9 @@
 //! The Cloudflare adapter: a [`Target`] that drives a pinned `wrangler`.
 //!
-//! **Unverified against a real account.** The commands and flags below were read from `wrangler 4.141.0 --help`; what `wrangler` prints
-//! (marked UNVERIFIED in the parsing code) is assumed, because no test account exists yet (DESIGN.md D6). So every operation reports
-//! [`Support::Unverified`] and a real plan is refused until the caller opts in with [`CloudflareTarget::trust_operations`].
+//! **Checked once against a real account (2026-11-08, `wrangler` 4.141.0, a throwaway Worker; `docs/CLOUDFLARE-FACTS.md`):** `Create`, `SetSetting`,
+//! `SetSecret` and `DeleteSecret` each ran for real and read back correctly, and the answer shapes below match. That is one run by hand, not a test account
+//! (DESIGN.md D6), so every operation still reports [`Support::Unverified`] and a real plan is refused until the caller opts in with
+//! [`CloudflareTarget::trust_operations`]. `Restore` has not been tried.
 //! The conformance suite runs against it through a fake [`Runner`] in this module's tests.
 //!
 //! Needs Node, `wrangler` and (to deploy a container) Docker on the machine that runs it; see `docs/CLOUDFLARE-FACTS.md`.
@@ -288,7 +289,8 @@ impl<R: Runner> CloudflareTarget<R> {
                 )))
             };
         }
-        // UNVERIFIED shape: a JSON array of deployments, newest last, each with `versions[0].version_id`.
+        // Shape checked against a real account 2026-11-08: a JSON array of deployments, newest last (a setting changed after several deploys read back
+        // correctly), each with `versions[0].version_id`.
         let version = serde_json::from_str::<Value>(&list.stdout)
             .ok()
             .and_then(|v| {
@@ -312,7 +314,8 @@ impl<R: Runner> CloudflareTarget<R> {
                 first_line(&view.stderr)
             )));
         }
-        // UNVERIFIED shape: `resources.bindings` is an array of {type, name, text}; plain settings have type "plain_text".
+        // Shape checked against a real account 2026-11-08: `resources.bindings` is an array of {type, name, text}; plain settings have type "plain_text" (a
+        // secret appears as type "secret_text").
         let bindings = serde_json::from_str::<Value>(&view.stdout)
             .ok()
             .and_then(|v| {
@@ -341,7 +344,7 @@ impl<R: Runner> CloudflareTarget<R> {
                 first_line(&out.stderr)
             )));
         }
-        // UNVERIFIED shape: a JSON array of {name, type}.
+        // Shape checked against a real account 2026-11-08: a JSON array of {name, type} (empty array when none).
         serde_json::from_str::<Value>(&out.stdout)
             .ok()
             .and_then(|v| {
@@ -380,7 +383,7 @@ impl<R: Runner> CloudflareTarget<R> {
 }
 
 fn looks_absent(stderr: &str) -> bool {
-    // UNVERIFIED wording: Cloudflare's "this Worker does not exist" is error code 10007.
+    // Checked against a real account 2026-11-08: a Worker that does not exist answers with error code 10007.
     let s = stderr.to_lowercase();
     s.contains("10007") || s.contains("not found") || s.contains("does not exist")
 }
