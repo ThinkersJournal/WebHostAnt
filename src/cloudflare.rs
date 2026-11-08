@@ -186,6 +186,7 @@ pub struct CloudflareTarget<R: Runner> {
     runner: R,
     project_dir: PathBuf,
     probe: Box<dyn Fn(&str) -> bool>,
+    ready: Option<Box<dyn Fn(&str) -> bool>>,
     domains: Option<Domains<Box<dyn Rest>>>,
     trusted: BTreeSet<Op>,
     log: RefCell<Vec<String>>,
@@ -230,10 +231,19 @@ impl<R: Runner> CloudflareTarget<R> {
             runner,
             project_dir: project_dir.into(),
             probe: Box::new(probe),
+            ready: None,
             domains: None,
             trusted: BTreeSet::new(),
             log: RefCell::new(Vec::new()),
         }
+    }
+
+    /// After every deploy this adapter makes (`Create` and each `SetSetting`), ask `ready` whether the app is up and fail the step if it is not. Use
+    /// a waiting probe here ([`crate::HealthProbe::into_waiting_probe`]) for a container, which needs minutes. Left unset, a deploy is not waited for.
+    /// Planning and read-back use the plain `probe` given to `new`, so a down app never makes a plan slow.
+    pub fn with_ready_wait(mut self, ready: impl Fn(&str) -> bool + 'static) -> Self {
+        self.ready = Some(Box::new(ready));
+        self
     }
 
     /// Bind domains through the Workers REST API ([`Domains`]). Without this, `BindDomain` is `No`. Still `Unverified` until trusted.
@@ -422,6 +432,7 @@ impl<R: Runner> Target for CloudflareTarget<R> {
         step: &Step,
         secret: Option<&SecretValue>,
     ) -> Result<(), Error> {
+        let deploys = matches!(step, Step::Create | Step::SetSetting { .. });
         let (call_text, out) = match step {
             Step::BindDomain { name } => {
                 let Some(domains) = &self.domains else {
@@ -462,6 +473,17 @@ impl<R: Runner> Target for CloudflareTarget<R> {
         };
         if out.success {
             self.log.borrow_mut().push(call_text);
+            if deploys
+                && let Some(ready) = &self.ready
+                && !ready(app_id)
+            {
+                self.log
+                    .borrow_mut()
+                    .push("deployed, but the app did not become healthy".to_string());
+                return Err(Error::Target(
+                    "deployed, but the app did not become healthy in time; read the Worker's logs, then plan again".to_string(),
+                ));
+            }
             Ok(())
         } else {
             let msg = redact(first_line(&out.stderr));
@@ -773,6 +795,79 @@ mod tests {
         assert!(host.plan(&drop, &Config::new()).unwrap().is_empty());
         // The name stays out of the log.
         assert!(!host.target().diagnostics().contains(NAME));
+    }
+
+    #[test]
+    fn a_deploy_is_waited_for_when_asked_and_a_secret_put_is_not() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let asked = Rc::new(Cell::new(0));
+        let seen = asked.clone();
+        let mut t = target(FakeWrangler::new()).with_ready_wait(move |_| {
+            seen.set(seen.get() + 1);
+            true
+        });
+        t.apply_step("conformance-app", &Step::Create, None)
+            .unwrap();
+        t.apply_step(
+            "conformance-app",
+            &Step::SetSetting {
+                name: "A".into(),
+                value: "1".into(),
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(asked.get(), 2);
+        t.apply_step(
+            "conformance-app",
+            &Step::SetSecret { name: "K".into() },
+            Some(&SecretValue::new("v")),
+        )
+        .unwrap();
+        assert_eq!(asked.get(), 2, "a secret put does not deploy");
+    }
+
+    #[test]
+    fn a_deploy_whose_app_never_comes_up_fails_the_step() {
+        let mut t = target(FakeWrangler::new()).with_ready_wait(|_| false);
+        let e = t
+            .apply_step("conformance-app", &Step::Create, None)
+            .unwrap_err();
+        assert!(e.to_string().contains("did not become healthy"), "{e}");
+        assert!(t.diagnostics().contains("did not become healthy"));
+        // Without the wait, the same deploy is a success.
+        let mut plain = target(FakeWrangler::new());
+        plain
+            .apply_step("conformance-app", &Step::Create, None)
+            .unwrap();
+    }
+
+    fn shell(script: &str) -> Command {
+        if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.args(["/C", script]);
+            c
+        } else {
+            let mut c = Command::new("sh");
+            c.args(["-c", script]);
+            c
+        }
+    }
+
+    #[test]
+    fn a_notice_on_stderr_does_not_make_a_successful_call_fail() {
+        // Humboldt's demo: npm printed a notice on stderr and a PowerShell script read it as an error. Only the exit code decides.
+        let notice = if cfg!(windows) {
+            "echo npm notice a new version is available 1>&2"
+        } else {
+            "echo npm notice a new version is available >&2"
+        };
+        let out = run_bounded(shell(notice), None, Duration::from_secs(30), "notice").unwrap();
+        assert!(out.success);
+        assert!(out.stderr.contains("notice"), "the notice was captured");
+        let failed = run_bounded(shell("exit 3"), None, Duration::from_secs(30), "exit").unwrap();
+        assert!(!failed.success);
     }
 
     #[test]
