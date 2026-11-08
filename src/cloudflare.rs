@@ -213,6 +213,11 @@ fn secret_name_put_args(name: &str, app_id: &str) -> Vec<String> {
     strings(&["secret", "put", name, "--name", app_id])
 }
 
+/// Arguments of `wrangler secret delete`: the NAME only. Wrangler asks "are you sure"; the answer travels on stdin.
+fn secret_delete_args(name: &str, app_id: &str) -> Vec<String> {
+    strings(&["secret", "delete", name, "--name", app_id])
+}
+
 impl<R: Runner> CloudflareTarget<R> {
     /// `project_dir` holds the Worker's `wrangler` config. `probe` answers whether the app's health path answers for an app id; it is a
     /// parameter because HTTP calls belong to HTTPAnt, which is not built yet.
@@ -434,6 +439,13 @@ impl<R: Runner> Target for CloudflareTarget<R> {
                 format!("deploy (set {name})"),
                 self.deploy(app_id, &[(name, value)])?,
             ),
+            Step::DeleteSecret { name } => {
+                let call = Call {
+                    args: secret_delete_args(name, app_id),
+                    stdin: Some(SecretValue::new("y")),
+                };
+                ("secret delete".to_string(), self.runner.run(&call)?)
+            }
             Step::SetSecret { name } => {
                 let value = secret
                     .ok_or_else(|| Error::Target("no value supplied for a secret".to_string()))?;
@@ -490,6 +502,7 @@ impl<R: Runner> Target for CloudflareTarget<R> {
 mod tests {
     use super::*;
     use crate::conformance::{self, Scenario};
+    use crate::{Config, Host};
 
     #[derive(Default)]
     struct State {
@@ -587,6 +600,14 @@ mod tests {
                     s.secrets.insert(name.to_string());
                     ok("")
                 }
+                ["secret", "delete", name, ..] => {
+                    s.calls.push(format!("secret delete {name}"));
+                    if s.secrets.remove(*name) {
+                        ok("")
+                    } else {
+                        err("Secret not found [code: 10056]")
+                    }
+                }
                 ["deploy", rest @ ..] => {
                     s.exists = true;
                     s.marked = true;
@@ -616,6 +637,7 @@ mod tests {
             Op::Create,
             Op::SetSetting,
             Op::SetSecret,
+            Op::DeleteSecret,
         ])
     }
 
@@ -731,6 +753,39 @@ mod tests {
             .unwrap_err();
         assert!(!e.to_string().contains("CANARY-xyz"), "{e}");
         assert!(!t.diagnostics().contains("CANARY-xyz"));
+    }
+
+    #[test]
+    fn a_secret_the_app_must_not_have_is_deleted_through_wrangler() {
+        const NAME: &str = "ZZ_FAKE_SECRET_NAME_92";
+        let mut host = Host::new(target(FakeWrangler::new()));
+        let want = crate::AppManifest::new("conformance-app").secret(NAME);
+        let plan = host.plan(&want, &Config::new()).unwrap();
+        let secrets = crate::MapSecrets::new().with(NAME, "CANARY-xyz");
+        host.apply_approved(&plan, &plan.digest(), &secrets)
+            .unwrap();
+        let drop = crate::AppManifest::new("conformance-app").without_secret(NAME);
+        let plan = host.plan(&drop, &Config::new()).unwrap();
+        assert_eq!(plan.steps().len(), 1);
+        host.apply_approved(&plan, &plan.digest(), &crate::MapSecrets::new())
+            .unwrap();
+        assert!(host.target().runner.0.borrow().secrets.is_empty());
+        assert!(host.plan(&drop, &Config::new()).unwrap().is_empty());
+        // The name stays out of the log.
+        assert!(!host.target().diagnostics().contains(NAME));
+    }
+
+    #[test]
+    fn a_failed_secret_delete_is_an_error_and_the_name_stays_out_of_it() {
+        const NAME: &str = "ZZ_FAKE_SECRET_NAME_93";
+        let mut t = target(FakeWrangler::new());
+        let step = Step::DeleteSecret {
+            name: NAME.to_string(),
+        };
+        // The fake answers "Secret not found" for a secret it does not hold.
+        let e = t.apply_step("x", &step, None).unwrap_err();
+        assert!(!e.to_string().contains(NAME), "{e}");
+        assert!(!t.diagnostics().contains(NAME));
     }
 
     #[test]
@@ -921,6 +976,7 @@ compatibility_date = \"2025-01-01\"
             ),
             ("secret list", secret_list_args("some-app")),
             ("secret put", secret_name_put_args("SOME_NAME", "some-app")),
+            ("secret delete", secret_delete_args("SOME_NAME", "some-app")),
         ] {
             let text = without_credentials(&args);
             assert!(

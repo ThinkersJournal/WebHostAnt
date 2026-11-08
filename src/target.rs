@@ -13,6 +13,8 @@ pub enum Op {
     SetSetting,
     /// Set a secret.
     SetSecret,
+    /// Delete a secret the app must not have.
+    DeleteSecret,
     /// Put the app back to a [`Snapshot`] taken earlier.
     Restore,
     /// Read the app's domain and certificate status.
@@ -49,6 +51,11 @@ pub enum Step {
         /// Secret name.
         name: String,
     },
+    /// Delete a secret by name. A host that keeps secrets across a deploy (Cloudflare does) never drops one by itself.
+    DeleteSecret {
+        /// Secret name.
+        name: String,
+    },
     /// Bind a host name to the app. Nothing else: no DNS records, no certificate material.
     BindDomain {
         /// The host name.
@@ -63,6 +70,7 @@ impl Step {
             Step::Create => Op::Create,
             Step::SetSetting { .. } => Op::SetSetting,
             Step::SetSecret { .. } => Op::SetSecret,
+            Step::DeleteSecret { .. } => Op::DeleteSecret,
             Step::BindDomain { .. } => Op::BindDomain,
         }
     }

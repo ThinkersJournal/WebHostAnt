@@ -120,7 +120,7 @@ impl Target for FakeTarget {
 
     fn supports(&self, op: Op) -> Support {
         match op {
-            Op::SetSecret => self.secrets_support,
+            Op::SetSecret | Op::DeleteSecret => self.secrets_support,
             Op::Create | Op::SetSetting | Op::Restore | Op::ReadTls | Op::BindDomain => {
                 Support::Yes
             }
@@ -195,6 +195,10 @@ impl Target for FakeTarget {
                     self.domains.insert(name.clone());
                 }
                 self.log.push(format!("bound {name}"));
+            }
+            Step::DeleteSecret { name } => {
+                self.secret_values.remove(name);
+                self.log.push("delete secret".to_string());
             }
             Step::SetSecret { name } => {
                 let value = secret

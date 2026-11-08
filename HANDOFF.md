@@ -37,10 +37,10 @@ PM allocates at gate). Memory rule: CARGO_BUILD_JOBS=2, one build at a time. Rep
 Relaunch pins `--model sonnet`. Read C:\Projects\THROTTLE.md first. Channel: Synapse only (`pm@ciresnave`); my session was dropped by the 2026-10-30 restart, PM said do NOT re-claim. Do not loop on GitHub PR status.
 
 ## State (2026-11-08)
-PM TASK 2026-11-08 (CireSnave: "Yes, go ahead and get WebHostAnt started on the Cloudflare path."): ROADMAP rows C1-C8 written; build them one PR each, C1 first.
-main = 840836e (0.0.31). PR `cf-roadmap` (0.0.32, docs) open from worktree `../WebHostAnt-wt-cf-roadmap`; remove worktree+branch when merged.
-Asked `humboldt` for demo-deploy-steps.md (not on origin/main); read `.lane-state/humboldt-demo-deploy*.ps1/.out` meanwhile. No [ASK] to PM: D6-D8 do not block C1-C4.
-No WAIT lines. Render slice 3 (`Restore` via rollback + `ReadTls`) stays held behind the Cloudflare rows.
+PM TASK 2026-11-08 (Cloudflare path): ROADMAP rows C1-C8 merged (#31, main 5c98949). C1 DeleteSecret = PR #32 `c1-delete-secret` (0.0.33, head 1d7ed76, [READY] sent), worktree `../WebHostAnt-wt-c1-delete-secret`.
+**TASK (waiter):** when #32 merges: remove that worktree (check `git status --porcelain`), `git worktree prune`, `git branch -D c1-delete-secret`, confirm remote branch absent (the forge auto-deletes it).
+**NEXT unblocked row: C2** `EnvSecrets` (a `Secrets` source reading named env vars), one PR, red first, mutations listed; then C3, C4, C5, C6 (ROADMAP.md). Do not stack on #32 unless needed: C2 touches only manifest.rs.
+No WAIT lines. Render slice 3 stays held behind the Cloudflare rows. Existing timing test `a_call_that_outlives_its_limit...` can fail in a loaded full run; passes alone.
 Render test account needs (do NOT ask; PM puts on board 320 next to D6): dedicated workspace + API key + workspace id + public test image. Cloudflare real-token rows wait for D6: run `docs/RELEASE-CHECKLIST.md` by hand before releases touching cloudflare.rs. D7, D8, local serving/TLS (WebServAnt 0.0.0) still wait.
 
 Docs: `docs/SECOND-HOST.md`, `docs/TLS-NEED-LIST.md`, `docs/HTTPS-CLIENT-NEEDS.md`, `docs/CONSUMER-CONTRACT.md`, ROADMAP.md. Gotchas: CRLF-in-worktree/LF-in-blob (scripted replaces assert count==1); worktree, never switch the primary; `wrangler` is a `.cmd` shim; tests must print fixed labels (CodeQL); `supertool` untracked, leave alone; this HANDOFF is an uncommitted local edit (commit with the next PR).
