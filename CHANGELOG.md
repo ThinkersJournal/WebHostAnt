@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.43] - 2026-11-09
+
+- Docs: recorded the PM's first real run of `tests/real_cloudflare.rs` on the test account (5 passed, Workers 0 before and after, same fingerprint; `docs/REAL-TARGET-TESTS.md`). No code change. Version provisional; the PM allocates.
+
 ## [0.0.42] - 2026-11-08
 
 - Dependency: `configurant` 0.5.43 -> 0.7.2 (optional feature `configurant`; CireSnave's keep-current rule). 0.7.0 is Breaking upstream (an unset table is absent), 0.7.1 and 0.7.2 add `Config::project`/`configurant project --format env|wrangler|compose`; WebHostAnt's `configurant_source` needed no code change and all tests, clippy and doc tests pass. Possible later use of `project --format wrangler` is not started. No behaviour change. Version provisional; the PM allocates.

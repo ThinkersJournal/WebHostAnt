@@ -22,3 +22,7 @@ the test fails by saying so if it has none.
 
 Run by hand (the PM, with the vault): `with-secret CLOUDFLARE_WEBHOSTANT_TEST_API_TOKEN ... -- cargo test --test real_cloudflare -- --nocapture` with
 `WEBHOSTANT_REAL_TARGET=1` and `CLOUDFLARE_ACCOUNT_ID` set. **Nobody runs it on the vault without the PM's go.**
+
+## First real run (PM, 2026-11-09)
+
+The PM ran `cargo test --test real_cloudflare` through the vault on the test account (workers.dev subdomain `webhostant-test-account`) at ref 69a22a0: **5 passed, 0 failed, 347 s**. The account's Workers were 0 before and 0 after, the same fingerprint (`e3b0c44298fc1c14`, the empty list), so cleanup left nothing. An earlier attempt stopped only because the account had no workers.dev subdomain yet (the failure the test names). This is a PM run, not CI: the self-hosted-runner workflow does not exist yet. It exercised Create, SetSetting, SetSecret, DeleteSecret and Restore (a later change, and a first deploy) for real with an API token; containers, domains and `ReadTls` remain unrun.
