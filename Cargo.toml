@@ -1,6 +1,6 @@
 [package]
 name = "webhostant"
-version = "0.0.46"
+version = "0.0.47"
 edition = "2024"
 description = "Deploy a web app to a host and prove it is there: plan, apply, read back, with a conformance suite for host adapters. Early: Cloudflare adapter exists but is unverified against a real account."
 license = "MIT OR Apache-2.0"
@@ -13,7 +13,17 @@ sha2 = "0.11.1"
 httpant-client = { version = "0.7.1", features = ["https"] }
 tokio = { version = "1.54.1", features = ["rt"] }
 configurant = { version = "0.7.2", optional = true }
+webservant = { version = "0.4.4", optional = true }
+x509-parser = { version = "0.18", optional = true }
 
 [features]
 # Read an app's settings from a resolved ConfigurAnt configuration (docs/DESIGN.md section 6.3).
 configurant = ["dep:configurant"]
+# Serve an app from this machine with WebServAnt and read its certificate back (ROADMAP row C8).
+local = ["dep:webservant", "dep:x509-parser"]
+
+[dev-dependencies]
+# For the `local` tests: a self-signed certificate on a temporary directory, and a runtime with the network and timers.
+rcgen = "0.14.10"
+tempfile = "3.27.0"
+tokio = { version = "1.54.1", features = ["rt", "net", "time"] }

@@ -14,6 +14,8 @@ pub mod cloudflare_domains;
 pub mod configurant_source;
 pub mod conformance;
 pub mod fake;
+#[cfg(feature = "local")]
+pub mod local;
 pub mod preflight;
 pub mod render;
 pub mod render_target;
