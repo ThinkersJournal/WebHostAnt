@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.44] - 2026-11-10
+
+- Dependency: `httpant-client` 0.5.22 -> 0.7.1 (CireSnave's keep-current rule; the PM named 0.7.1 as published). No code change needed: clippy with warnings denied, all tests and doc tests pass. `a_call_that_outlives_its_limit_is_stopped_and_reported` failed once in two runs and passed in two (the known flaky test; it measures a time limit). Version provisional; the PM allocates.
+
 ## [0.0.43] - 2026-11-09
 
 - Docs: recorded the PM's first real run of `tests/real_cloudflare.rs` on the test account (5 passed, Workers 0 before and after, same fingerprint; `docs/REAL-TARGET-TESTS.md`). No code change. Version provisional; the PM allocates.
