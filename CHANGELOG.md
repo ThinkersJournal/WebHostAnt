@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.45] - 2026-11-10
+
+- Docs: ROADMAP row C8 (local serving and TLS) split into C8a to C8e, the first (a `local` feature and the `ReadTls` read-back from a real handshake) buildable now against webservant 0.4.4. Noted: webservant pins httpant `~0.5.22` while we use `httpant-client` 0.7.1, so two httpant lines compile together until webservant moves. No code change. Version provisional; the PM allocates.
+
 ## [0.0.44] - 2026-11-10
 
 - Dependency: `httpant-client` 0.5.22 -> 0.7.1 (CireSnave's keep-current rule; the PM named 0.7.1 as published). No code change needed: clippy with warnings denied, all tests and doc tests pass. `a_call_that_outlives_its_limit_is_stopped_and_reported` failed once in two runs and passed in two (the known flaky test; it measures a time limit). Version provisional; the PM allocates.
