@@ -152,6 +152,12 @@ pub trait Target {
         step: &Step,
         secret: Option<&SecretValue>,
     ) -> Result<(), Error>;
+    /// Called once by [`crate::Host::apply`] after every step has been applied and before the read-back, so a target that batches work (Render:
+    /// one deploy for all the variable changes) can finish it. Not called when a step failed. The default does nothing. A failure is an apply
+    /// failure like a failed step: the changes were made, the host may not be serving them, and a rollback point is returned.
+    fn finish_apply(&mut self, _app_id: &str) -> Result<(), Error> {
+        Ok(())
+    }
     /// What is held now, so a later [`Target::restore`] can put it back. Read-only. The default reads `locate` and `observe`.
     fn snapshot(&self, app_id: &str) -> Result<Snapshot, Error> {
         Ok(match self.locate(app_id)? {

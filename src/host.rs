@@ -432,6 +432,13 @@ impl<T: Target> Host<T> {
             }
             outcomes[i] = StepOutcome::Applied;
         }
+        if let Err(cause) = self.target.finish_apply(&plan.app_id) {
+            return Err(Error::ApplyFailed {
+                steps: outcomes,
+                cause: Box::new(cause),
+                rollback_point: point(plan.steps.len()),
+            });
+        }
         match self.verify(plan) {
             Ok(read_back) => Ok(Applied {
                 steps_applied: plan.steps.len(),

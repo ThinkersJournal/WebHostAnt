@@ -14,8 +14,9 @@
 //! * **Secrets are variables.** Render's variable schema has no secret flag, so a secret is a variable whose name is listed in the variable
 //!   `WEBHOSTANT_SECRETS`. Reads discard the value: a secret is reported by name only. Whether Render's API shows a variable's value to a token
 //!   holder is **UNVERIFIED**; assume it does.
-//! * **Every variable change is followed by a deploy that is waited for**, because whether Render redeploys on a variable change by API is
-//!   **UNVERIFIED**. A plan with many variables therefore waits for many deploys; a `Target` hook that deploys once at the end is a follow-up.
+//! * **One deploy, at the end, that is waited for.** Whether Render redeploys on a variable change by API is **UNVERIFIED**, so the adapter
+//!   deploys itself: variable changes are marked pending, and [`Target::finish_apply`] triggers a single deploy and waits until it is live. `Create`
+//!   deploys on its own. A failed step leaves the variables changed and the deploy pending; the rollback point restores both.
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -79,6 +80,8 @@ pub struct RenderTarget<R: Rest> {
     pacing: Pacing,
     trusted: BTreeSet<Op>,
     log: RefCell<Vec<String>>,
+    /// Variables were changed since the last deploy: `finish_apply` must deploy.
+    pending_deploy: bool,
 }
 
 /// A service with its variables, if there is one.
@@ -116,6 +119,7 @@ impl<R: Rest> RenderTarget<R> {
             pacing: Pacing::default(),
             trusted: BTreeSet::new(),
             log: RefCell::new(Vec::new()),
+            pending_deploy: false,
         }
     }
 
@@ -270,11 +274,11 @@ impl<R: Rest> Target for RenderTarget<R> {
                     .map(|()| "create")
             }
             Step::SetSetting { name, value } => self
-                .with_service(app_id, |me, id| {
-                    me.api.put_env_var(id, name, value)?;
-                    me.redeploy(id)
-                })
-                .map(|()| "set setting"),
+                .with_service(app_id, |me, id| me.api.put_env_var(id, name, value))
+                .map(|()| {
+                    self.pending_deploy = true;
+                    "set setting"
+                }),
             Step::DeleteSecret { .. } => {
                 return Err(Error::Unsupported {
                     target: "render".to_string(),
@@ -289,10 +293,12 @@ impl<R: Rest> Target for RenderTarget<R> {
                     let mut names = secret_names(me.api.env_vars(id)?.get(SECRETS_MARKER));
                     names.insert(name.clone());
                     let list = names.into_iter().collect::<Vec<_>>().join(",");
-                    me.api.put_env_var(id, SECRETS_MARKER, &list)?;
-                    me.redeploy(id)
+                    me.api.put_env_var(id, SECRETS_MARKER, &list)
                 })
-                .map(|()| "set secret")
+                .map(|()| {
+                    self.pending_deploy = true;
+                    "set secret"
+                })
             }
             Step::BindDomain { name } => self
                 .with_service(app_id, |me, id| {
@@ -311,6 +317,21 @@ impl<R: Rest> Target for RenderTarget<R> {
                 Err(e)
             }
         }
+    }
+
+    fn finish_apply(&mut self, app_id: &str) -> Result<(), Error> {
+        if !self.pending_deploy {
+            return Ok(());
+        }
+        let result = self.with_service(app_id, |me, id| me.redeploy(id));
+        match &result {
+            Ok(()) => {
+                self.pending_deploy = false;
+                self.note("deployed once for all variable changes");
+            }
+            Err(e) => self.note(&format!("the final deploy failed: {e}")),
+        }
+        result
     }
 
     fn snapshot(&self, app_id: &str) -> Result<Snapshot, Error> {
@@ -717,8 +738,8 @@ mod tests {
     fn the_conformance_suite_passes_against_the_fake_render() {
         let failures = conformance::run(|scenario| match scenario {
             Scenario::Empty => target(Server::default()),
-            // The suite's plan makes six changing calls (create 1, setting 2, secret 3); after the sixth the network drops.
-            Scenario::DropsAfterApply => target(Server::dropping_after(6)),
+            // The suite's plan makes five changing calls (create 1, setting 2, secret value 3, secret-names variable 4, the one deploy 5); after the fifth the network drops.
+            Scenario::DropsAfterApply => target(Server::dropping_after(5)),
             Scenario::HoldsOtherApp => target(Server::holding_other_app()),
             Scenario::Unreachable => target(Server::down()),
             Scenario::FailsLastStepOnce => {
@@ -773,6 +794,132 @@ mod tests {
         assert_eq!(
             target(Server::default()).supports(Op::ReadTls),
             Support::Yes
+        );
+    }
+
+    fn deploy_posts(host: &crate::Host<RenderTarget<Server>>) -> usize {
+        host.target()
+            .api
+            .rest_for_test()
+            .calls
+            .borrow()
+            .iter()
+            .filter(|c| c.method == Method::Post && c.path.ends_with("/deploys"))
+            .count()
+    }
+
+    #[test]
+    fn a_plan_with_many_variable_changes_deploys_once_at_the_end_and_waits_for_it() {
+        let mut host = host_of(Server::default());
+        let m1 = crate::AppManifest::new("my-app").setting("MODE");
+        let first = host.plan(&m1, &cfg(&[("MODE", "one")])).unwrap();
+        host.apply_approved(&first, &first.digest(), &crate::MapSecrets::new())
+            .unwrap();
+        let before = deploy_posts(&host);
+        let m2 = crate::AppManifest::new("my-app")
+            .setting("MODE")
+            .setting("A")
+            .setting("B")
+            .secret("TOKEN");
+        let second = host
+            .plan(&m2, &cfg(&[("MODE", "two"), ("A", "1"), ("B", "2")]))
+            .unwrap();
+        let secrets = crate::MapSecrets::new().with("TOKEN", "CANARY-once-xyz");
+        host.apply_approved(&second, &second.digest(), &secrets)
+            .unwrap();
+        assert_eq!(
+            deploy_posts(&host) - before,
+            1,
+            "four variable changes, one deploy"
+        );
+        let server = host.target().api.rest_for_test();
+        let live = server.live.borrow()["srv-1"].clone();
+        let last = format!("dep-{}", server.next_deploy.get());
+        assert_eq!(
+            live, last,
+            "the one deploy was waited for until it was live"
+        );
+    }
+
+    #[test]
+    fn a_plan_that_changes_no_variable_triggers_no_extra_deploy() {
+        let mut host = host_of(Server::default());
+        let m1 = crate::AppManifest::new("my-app").setting("MODE");
+        let first = host.plan(&m1, &cfg(&[("MODE", "one")])).unwrap();
+        host.apply_approved(&first, &first.digest(), &crate::MapSecrets::new())
+            .unwrap();
+        let after_create = deploy_posts(&host);
+        let again = host.plan(&m1, &cfg(&[("MODE", "one")])).unwrap();
+        host.apply_approved(&again, &again.digest(), &crate::MapSecrets::new())
+            .unwrap();
+        assert_eq!(deploy_posts(&host), after_create);
+    }
+
+    #[test]
+    fn a_deploy_that_fails_at_the_end_is_an_apply_failure_with_a_rollback_point() {
+        let mut host = host_of(Server::default());
+        let m1 = crate::AppManifest::new("my-app").setting("MODE");
+        let first = host.plan(&m1, &cfg(&[("MODE", "one")])).unwrap();
+        host.apply_approved(&first, &first.digest(), &crate::MapSecrets::new())
+            .unwrap();
+        *host
+            .target()
+            .api
+            .rest_for_test()
+            .deploy_ends_as
+            .borrow_mut() = Some("build_failed".to_string());
+        let second = host.plan(&m1, &cfg(&[("MODE", "two")])).unwrap();
+        let err = host
+            .apply_approved(&second, &second.digest(), &crate::MapSecrets::new())
+            .unwrap_err();
+        match err {
+            Error::ApplyFailed { rollback_point, .. } => {
+                assert!(rollback_point.is_some(), "restore is trusted")
+            }
+            other => panic!("expected ApplyFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_plan_that_only_adds_a_secret_still_deploys_once() {
+        let mut host = host_of(Server::default());
+        let m1 = crate::AppManifest::new("my-app").setting("MODE");
+        let first = host.plan(&m1, &cfg(&[("MODE", "one")])).unwrap();
+        host.apply_approved(&first, &first.digest(), &crate::MapSecrets::new())
+            .unwrap();
+        let before = deploy_posts(&host);
+        let m2 = m1.clone().secret("TOKEN");
+        let second = host.plan(&m2, &cfg(&[("MODE", "one")])).unwrap();
+        let secrets = crate::MapSecrets::new().with("TOKEN", "CANARY-only-xyz");
+        host.apply_approved(&second, &second.digest(), &secrets)
+            .unwrap();
+        assert_eq!(deploy_posts(&host) - before, 1);
+    }
+
+    #[test]
+    fn a_failed_step_means_no_final_deploy() {
+        let mut host = host_of(Server::default());
+        let m1 = crate::AppManifest::new("my-app").setting("MODE");
+        let first = host.plan(&m1, &cfg(&[("MODE", "one")])).unwrap();
+        host.apply_approved(&first, &first.digest(), &crate::MapSecrets::new())
+            .unwrap();
+        let before = deploy_posts(&host);
+        host.target()
+            .api
+            .rest_for_test()
+            .fail_secret_put_once
+            .set(true);
+        let m2 = m1.clone().secret("API_TOKEN");
+        let second = host.plan(&m2, &cfg(&[("MODE", "two")])).unwrap();
+        let secrets = crate::MapSecrets::new().with("API_TOKEN", "CANARY-fail-xyz");
+        assert!(
+            host.apply_approved(&second, &second.digest(), &secrets)
+                .is_err()
+        );
+        assert_eq!(
+            deploy_posts(&host),
+            before,
+            "nothing deployed after a failed step"
         );
     }
 

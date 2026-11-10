@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.46] - 2026-11-10
+
+- Render adapter: one deploy at the end of an apply (stacked on 0.0.45). `Target` gains `finish_apply(app_id)` (default: nothing), called by `Host::apply` once after every step is applied and before the read-back, never after a failed step; a failure there is an `ApplyFailed` with a rollback point, like a failed step. `RenderTarget` no longer deploys after each `SetSetting`/`SetSecret`: it marks a deploy pending and `finish_apply` triggers ONE deploy and waits until it is live (a plan with four variable changes made four deploys before; now one). `Create` still deploys on its own; a plan with no variable change makes no extra deploy. Seven mutations (never deploys; deploys per change again; secret not marked; pending never cleared; deploys with nothing pending; host never calls the hook; hook failure ignored) each fail a test. The fake's drop-after-N count for the conformance suite goes from six to five changing calls. Not breaking for callers (a new defaulted method; a custom `Target` is unaffected). Behaviour against a real Render account is UNVERIFIED until the PM-approved run. Version provisional; the PM allocates.
+
 ## [0.0.45] - 2026-11-10
 
 - Docs: ROADMAP row C8 (local serving and TLS) split into C8a to C8e, the first (a `local` feature and the `ReadTls` read-back from a real handshake) buildable now against webservant 0.4.4. Noted: webservant pins httpant `~0.5.22` while we use `httpant-client` 0.7.1, so two httpant lines compile together until webservant moves. No code change. Version provisional; the PM allocates.
