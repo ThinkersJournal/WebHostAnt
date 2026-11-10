@@ -27,6 +27,15 @@ pub const WEB_SERVICE_PLANS: &[&str] = &[
     "custom",
 ];
 
+/// A URL path: one leading slash, then letters, digits and `- _ . ~ /`. A drive path, a name with a space or a `?`, or `//host` is not one.
+fn valid_health_path(path: &str) -> bool {
+    path.starts_with('/')
+        && !path.starts_with("//")
+        && path
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~' | '/'))
+}
+
 /// A page this size is refused as possibly incomplete: the answer does not say whether more follow, so reading only this page could hide some.
 const PAGE: usize = 100;
 
@@ -105,6 +114,8 @@ pub struct Deploy {
     pub id: String,
     /// Where it is.
     pub status: DeployStatus,
+    /// The status word exactly as Render sent it (for diagnostics: a fixed vocabulary, never a value).
+    pub word: String,
 }
 
 /// A custom domain Render holds for a service.
@@ -205,9 +216,11 @@ impl<R: Rest> RenderApi<R> {
 
     fn deploy_of(v: &Value) -> Option<Deploy> {
         let d = v.get("deploy").unwrap_or(v);
+        let word = d.get("status")?.as_str()?;
         Some(Deploy {
             id: d.get("id")?.as_str()?.to_string(),
-            status: DeployStatus::parse(d.get("status")?.as_str()?),
+            status: DeployStatus::parse(word),
+            word: word.to_string(),
         })
     }
 
@@ -243,6 +256,36 @@ impl<R: Rest> RenderApi<R> {
         Ok(found)
     }
 
+    /// How many services this workspace holds (`GET /services?ownerId=...`), for checking that a run left the account as it found it. A full page is
+    /// refused rather than counted, and only services of this workspace count.
+    pub fn service_count(&self) -> Result<usize, Error> {
+        let body = self.get(
+            "/services".to_string(),
+            vec![
+                ("ownerId".into(), self.owner_id.clone()),
+                ("limit".into(), PAGE.to_string()),
+            ],
+        )?;
+        let items = body
+            .as_array()
+            .ok_or_else(|| Error::Target("the service list is not an array".to_string()))?;
+        if items.len() >= PAGE {
+            return Err(Error::Target(
+                "Render returned a full page of services; the count would be a floor".to_string(),
+            ));
+        }
+        let mut count = 0;
+        for item in items {
+            let s = Self::service_of(item).ok_or_else(|| {
+                Error::Target("a service in the list lacks id, name, type or ownerId".to_string())
+            })?;
+            if s.owner_id == self.owner_id {
+                count += 1;
+            }
+        }
+        Ok(count)
+    }
+
     /// Create a web service that runs a container image, with plain settings as variables. Refuses a plan the schema does not list. Secrets do not go
     /// here: set them afterwards with [`RenderApi::put_env_var`] or [`RenderApi::put_secret_file`].
     pub fn create_web_service(
@@ -257,6 +300,12 @@ impl<R: Rest> RenderApi<R> {
             return Err(Error::Target(format!(
                 "'{plan}' is not a plan Render lists for a web service"
             )));
+        }
+        if !valid_health_path(health_path) {
+            return Err(Error::Target(
+                "the health path must be a URL path such as /health: it starts with one slash and holds letters, digits and - _ . ~ / only"
+                    .to_string(),
+            ));
         }
         let env_vars: Vec<Value> = settings
             .iter()
@@ -571,13 +620,13 @@ pub(crate) mod tests {
             let p = call.path.as_str();
             match (call.method, p) {
                 (Method::Get, "/services") => {
+                    // No `name` filter (a count) matches everything.
                     let want = call
                         .query
                         .iter()
                         .find(|(k, _)| k == "name")
-                        .unwrap()
-                        .1
-                        .clone();
+                        .map(|(_, v)| v.clone())
+                        .unwrap_or_default();
                     let mut rows: Vec<Value> = self
                         .services
                         .borrow()
@@ -714,6 +763,66 @@ pub(crate) mod tests {
             "https://app.example.org"
         );
         assert!(a.find_service("nobody").unwrap().is_none()); // control: the filter filters
+    }
+
+    #[test]
+    fn a_health_path_that_is_not_a_url_path_is_refused_before_any_call() {
+        // The first real run sent "C:/Program Files/Git/": a shell had rewritten "/". Render never finished that deploy.
+        for bad in [
+            "",
+            "health",
+            "C:/Program Files/Git/",
+            r"C:\x",
+            "/a b",
+            "/a:b",
+            "/a?x=1",
+            "//host",
+        ] {
+            let a = api(FakeRender::default());
+            let e = a
+                .create_web_service("my-app", "docker.io/org/app:1", "free", bad, &settings())
+                .unwrap_err();
+            assert!(e.to_string().contains("health"), "{bad}: {e}");
+            assert!(a.rest.calls.borrow().is_empty(), "{bad}: a call was made");
+        }
+        for good in ["/", "/health", "/api/v1/ready", "/a-b_c.d"] {
+            api(FakeRender::default())
+                .create_web_service("my-app", "docker.io/org/app:1", "free", good, &settings())
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn the_service_count_counts_this_workspace_only_and_refuses_a_full_page() {
+        let a = api(FakeRender::default());
+        assert_eq!(a.service_count().unwrap(), 0);
+        a.create_web_service("one", "docker.io/org/app:1", "free", "/", &settings())
+            .unwrap();
+        a.create_web_service("two", "docker.io/org/app:1", "free", "/", &settings())
+            .unwrap();
+        assert_eq!(a.service_count().unwrap(), 2);
+        let calls = a.rest.calls.borrow();
+        let last = calls.last().unwrap();
+        assert_eq!(
+            (last.method, last.path.as_str()),
+            (Method::Get, "/services")
+        );
+        assert!(
+            last.query
+                .contains(&("ownerId".to_string(), OWNER.to_string()))
+        );
+        drop(calls);
+        let other = FakeRender::default();
+        other
+            .services
+            .borrow_mut()
+            .push(("srv-x".into(), "theirs".into(), "tea-other".into()));
+        assert_eq!(api(other).service_count().unwrap(), 0);
+        let full = FakeRender {
+            pad_services: 100,
+            ..FakeRender::default()
+        };
+        assert!(api(full).service_count().is_err());
     }
 
     #[test]
