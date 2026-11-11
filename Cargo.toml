@@ -1,6 +1,6 @@
 [package]
 name = "webhostant"
-version = "0.0.50"
+version = "0.0.51"
 edition = "2024"
 description = "Deploy a web app to a host and prove it is there: plan, apply, read back, with a conformance suite for host adapters. Early: Cloudflare adapter exists but is unverified against a real account."
 license = "MIT OR Apache-2.0"
@@ -21,7 +21,7 @@ secretant = { version = "0.0.2", optional = true }
 # Read an app's settings from a resolved ConfigurAnt configuration (docs/DESIGN.md section 6.3).
 configurant = ["dep:configurant"]
 # Serve an app from this machine with WebServAnt and read its certificate back (ROADMAP row C8).
-local = ["dep:webservant", "dep:x509-parser"]
+local = ["dep:webservant", "dep:x509-parser", "tokio/rt-multi-thread"]
 # Read secrets through SecretAnt (ROADMAP row C7a).
 secretant = ["dep:secretant"]
 
