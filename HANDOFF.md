@@ -11,8 +11,8 @@ lane's work order; ack each once; use `key=value` headers (MESSAGE-FORMATS). Doc
 - Main has: Cloudflare adapter, Render adapter (REST, deploy once at the end of an apply), conformance suite, EnvSecrets, `local` feature
   (C8a: `ReadTls` from a real handshake), configurant 0.7.2, httpant-client 0.7.1. Cloudflare D6 real test PASSED (PM, by hand). Render real run
   PASSED at run 3 (PM); what it does NOT show is in `docs/RENDER-FACTS.md`.
-- Open PRs (merge order by the PM's gate): #47 Render real-run example + status log + health-path check (0.0.48, branch `render-example`,
-  worktree `../WebHostAnt-wt-render-ex`); this PR, C7a `SecretAntSecrets` (0.0.49, `c7a-secretant-source`, worktree `../WebHostAnt-wt-c7a`).
+- Open PRs (merge order by the PM's gate): this PR, C7a `SecretAntSecrets` (0.0.49, `c7a-secretant-source`, worktree `../WebHostAnt-wt-c7a`); then the
+  conformance `Profile` PR (0.0.50, `conformance-skip-no`, worktree `../WebHostAnt-wt-conf-skip`). #47 (Render example) is merged.
 - When a PR merges: `git status --porcelain` in its worktree, `git worktree remove`, `git worktree prune`, `git branch -D`, confirm the remote branch
   is absent, fast-forward the primary. A stacked branch moves with `git rebase --onto origin/main <old base tip>`, never a merge; `--force-with-lease`
   on own branches only. Check the result is one commit and its tree matches the tested one.
