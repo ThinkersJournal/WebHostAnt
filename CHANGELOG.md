@@ -7,6 +7,9 @@
 - Render: the first real run (PM, 2026-11-10) created the service and cleaned up, but the first deploy did not finish in 600 s and the run said only that. Now `wait_live` notes each status Render reports, the word exactly as sent, when it CHANGES (so a timeout leaves the last one seen in `diagnostics()`), `Deploy` carries that `word`, and `examples/render_deploy.rs` prints the adapter log when a run fails; it also takes `--port` (sets the `PORT` variable: nginx listens on 80 while Render expects 10000, UNVERIFIED as the cause). The timeout is NOT raised. Three mutations (never noted; noted on every read; parsed label noted instead of the word) each fail a test. Version provisional; the PM allocates.
 
 - `examples/render_deploy.rs` (stacked on 0.0.46) and `RenderApi::service_count`: one throwaway free-tier Render service end to end for the by-hand real-account check: count the workspace's services, create, a second apply (two settings and a dummy secret, one deploy at the end), roll back, then delete the service it made (also on failure; only when the marker shows it is ours) and count again; it passes only when the count is unchanged. The key comes from `RENDER_API_KEY` only; output is fixed labels and service counts; a name not starting `webhostant-check` is refused. Nothing ran against Render yet. Version provisional; the PM allocates.
+## [0.0.49] - 2026-11-10
+
+- Row C7a: feature `secretant` (optional `secretant` 0.0.2) and `SecretAntSecrets`, a `Secrets` source over a getter that returns SecretAnt's `SecretValue`. A value that is not UTF-8 gives no value (no lossy copy), an empty value gives no value, `Debug` shows no value. The store (C7b) waits for SecretAnt; our `SecretValue` stays text (no breaking swap). Four mutations (lossy text, empty allowed, name ignored, Debug shows a value) each fail a test. Version provisional; the PM allocates.
 
 ## [0.0.47] - 2026-11-10
 
