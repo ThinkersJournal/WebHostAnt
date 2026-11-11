@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.52] - 2026-11-11
+
+- Row C8c (stacked on 0.0.51): `LocalTarget` supports `Restore`. The snapshot is the settings held; restoring puts them back and restarts the site from them (stopping the one that ran), stops a site whose restored settings have nothing to serve (neither `FILES` nor `PROXY`), and for an app that did not exist stops its site and forgets it. A site that is not ours is refused and left as it was. The conformance suite's rollback checks now run against a real loopback site, and a changed folder is served again after a rollback (read back over a real request). Eight mutations each fail a test. Not breaking. Version provisional; the PM allocates.
+
 ## [0.0.51] - 2026-11-11
 
 - Row C8b (stacked on 0.0.50): `local_target::LocalTarget` (feature `local`), a `Target` that serves an app from this machine with WebServAnt 0.4.4. `Create` registers the app, `SetSetting` records `FILES`, `BIND` (loopback unless `allow_non_loopback`; default a free `127.0.0.1` port) or `PROXY` (`/prefix=http://upstream`); any other setting name is refused when applied, never recorded. `finish_apply` starts the site, or stops and restarts it, once per apply. `observe` returns the settings held and asks the running site over a real request whether it answers its health path. Secrets, domains, `ReadTls` and `Restore` are `No` (C8d, C8c). The conformance suite passes against a real loopback site (using `Profile` from 0.0.50, with a test wrapper for the unreachable/failing-step/foreign-app scenarios). Fifteen mutations each fail a test. Adds `tokio/rt-multi-thread` to the `local` feature. Behaviour on another operating system, and with TLS, is UNVERIFIED. Version provisional; the PM allocates.

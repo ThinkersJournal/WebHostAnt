@@ -12,7 +12,8 @@
 //!   site listens on `127.0.0.1` at a free port.
 //! * `PROXY`: one forwarded path, as `/prefix=http://upstream`.
 //!
-//! Secrets, domains, certificates and `Restore` are declared `No` here: automatic certificates are row C8d and restore is C8c.
+//! Secrets, domains and certificates are declared `No` here (automatic certificates are row C8d). `Restore` (row C8c) puts the settings back to a
+//! snapshot and restarts the site from them, or stops the site and forgets the app when it did not exist before.
 //!
 //! The target owns a small thread runtime that keeps the site alive between calls, and dropping the target stops every site. Do not call it from
 //! inside an async runtime (`block_on` would panic): [`crate::Host`] is synchronous.
@@ -23,7 +24,8 @@ use std::net::SocketAddr;
 use webservant::{RunningSite, Settings, Site};
 
 use crate::{
-    Error, Health, HealthProbe, Observed, Op, Presence, SecretValue, Step, Support, Target,
+    Error, Health, HealthProbe, Observed, Op, Presence, SecretValue, Snapshot, Step, Support,
+    Target,
 };
 
 const FILES: &str = "FILES";
@@ -136,6 +138,14 @@ impl LocalTarget {
         }
     }
 
+    fn stop(&mut self, site: RunningSite) -> Result<(), Error> {
+        self.runtime
+            .block_on(site.shutdown())
+            .map_err(|e| Error::Target(format!("could not stop the running site: {e}")))?;
+        self.log.push("stopped the running site".to_string());
+        Ok(())
+    }
+
     fn settings_of(&self, app_id: &str, held: &BTreeMap<String, String>) -> Settings {
         let mut s = Settings {
             name: app_id.to_string(),
@@ -172,12 +182,10 @@ impl Target for LocalTarget {
 
     fn supports(&self, op: Op) -> Support {
         match op {
-            Op::Create | Op::SetSetting if self.trusted.contains(&op) => Support::Yes,
-            Op::Create | Op::SetSetting => Support::Unverified,
-            // No secret store or environment, no certificates yet (C8d), no restore yet (C8c).
-            Op::SetSecret | Op::DeleteSecret | Op::Restore | Op::ReadTls | Op::BindDomain => {
-                Support::No
-            }
+            Op::Create | Op::SetSetting | Op::Restore if self.trusted.contains(&op) => Support::Yes,
+            Op::Create | Op::SetSetting | Op::Restore => Support::Unverified,
+            // No secret store or environment, and no certificates yet (C8d).
+            Op::SetSecret | Op::DeleteSecret | Op::ReadTls | Op::BindDomain => Support::No,
         }
     }
 
@@ -262,10 +270,7 @@ impl Target for LocalTarget {
             .map_err(|e| Error::Target(format!("the settings do not make a site: {e}")))?;
         let old = self.apps.get_mut(app_id).and_then(|a| a.running.take());
         if let Some(old) = old {
-            self.runtime
-                .block_on(old.shutdown())
-                .map_err(|e| Error::Target(format!("could not stop the running site: {e}")))?;
-            self.log.push("stopped the running site".to_string());
+            self.stop(old)?;
         }
         let running = self
             .runtime
@@ -276,6 +281,41 @@ impl Target for LocalTarget {
             app.running = Some(running);
         }
         Ok(())
+    }
+
+    fn restore(&mut self, app_id: &str, snapshot: &Snapshot) -> Result<(), Error> {
+        if self.apps.get(app_id).is_some_and(|a| !a.ours) {
+            return Err(Error::NotOurs {
+                app: app_id.to_string(),
+            });
+        }
+        if !snapshot.existed {
+            if let Some(app) = self.apps.remove(app_id) {
+                if let Some(site) = app.running {
+                    self.stop(site)?;
+                }
+                self.log.push("removed the app".to_string());
+            }
+            return Ok(());
+        }
+        let held = &snapshot.observed.settings;
+        let app = self.apps.entry(app_id.to_string()).or_insert(App {
+            ours: true,
+            settings: BTreeMap::new(),
+            running: None,
+        });
+        app.settings = held.clone();
+        self.log.push("restored the settings".to_string());
+        if held.contains_key(FILES) || held.contains_key(PROXY) {
+            // `finish_apply` stops what runs and starts the restored settings.
+            self.finish_apply(app_id)
+        } else {
+            // Nothing the restored settings could serve: the site that ran stays stopped.
+            if let Some(old) = self.apps.get_mut(app_id).and_then(|a| a.running.take()) {
+                self.stop(old)?;
+            }
+            Ok(())
+        }
     }
 
     fn diagnostics(&self) -> String {
@@ -301,7 +341,7 @@ mod tests {
     fn target() -> LocalTarget {
         LocalTarget::new()
             .unwrap()
-            .trust_operations(&[Op::Create, Op::SetSetting])
+            .trust_operations(&[Op::Create, Op::SetSetting, Op::Restore])
     }
 
     fn files_profile(dir: &tempfile::TempDir) -> Profile {
@@ -381,6 +421,10 @@ mod tests {
         fn finish_apply(&mut self, app_id: &str) -> Result<(), Error> {
             self.down()?;
             self.inner.finish_apply(app_id)
+        }
+        fn restore(&mut self, app_id: &str, snapshot: &Snapshot) -> Result<(), Error> {
+            self.down()?;
+            self.inner.restore(app_id, snapshot)
         }
         fn diagnostics(&self) -> String {
             self.inner.diagnostics()
@@ -507,18 +551,17 @@ mod tests {
     }
 
     #[test]
-    fn secrets_domains_tls_and_restore_are_declared_no() {
+    fn secrets_domains_and_tls_are_declared_no() {
         let t = target();
-        for op in [
-            Op::SetSecret,
-            Op::DeleteSecret,
-            Op::Restore,
-            Op::ReadTls,
-            Op::BindDomain,
-        ] {
+        for op in [Op::SetSecret, Op::DeleteSecret, Op::ReadTls, Op::BindDomain] {
             assert_eq!(t.supports(op), Support::No, "{op:?}");
         }
         assert_eq!(t.supports(Op::Create), Support::Yes);
+        assert_eq!(t.supports(Op::Restore), Support::Yes);
+        assert_eq!(
+            LocalTarget::new().unwrap().supports(Op::Restore),
+            Support::Unverified
+        );
         // Not trusted yet: a plan refuses it.
         assert_eq!(
             LocalTarget::new().unwrap().supports(Op::SetSetting),
@@ -585,6 +628,131 @@ mod tests {
             t.apply_step(ID, &set, None),
             Err(Error::NotOurs { .. })
         ));
+    }
+
+    /// A folder holding one page, called `name`.
+    fn folder_with(name: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(name), "<p>ok</p>").unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_rollback_serves_the_old_folder_again() {
+        let (a, b) = (folder_with("a.html"), folder_with("b.html"));
+        // The health path is a page only folder `a` has, so "healthy" says which folder is being served.
+        let mut host = Host::new(target().with_health_path("/a.html"));
+        let first = host.plan(&manifest(), &config(&a, "127.0.0.1:0")).unwrap();
+        host.apply_approved(&first, &first.digest(), &MapSecrets::new())
+            .unwrap();
+        let second = host.plan(&manifest(), &config(&b, "127.0.0.1:0")).unwrap();
+        // Folder b has no a.html, so the read-back says unhealthy and the apply fails, with a point to go back to.
+        let Err(Error::ApplyFailed {
+            cause,
+            rollback_point: Some(point),
+            ..
+        }) = host.apply_approved(&second, &second.digest(), &MapSecrets::new())
+        else {
+            panic!("expected a failed apply with a rollback point");
+        };
+        assert!(
+            matches!(*cause, Error::ReadBackMismatch { .. }),
+            "{cause:?}"
+        );
+        assert_eq!(host.rollback(&point), crate::Rollback::Restored);
+        let seen = host.target().observe(ID).unwrap();
+        assert_eq!(
+            seen.settings.get(FILES),
+            Some(&a.path().display().to_string())
+        );
+        assert!(seen.healthy, "folder a is served again");
+        assert_eq!(
+            host.target()
+                .diagnostics()
+                .matches("restored the settings")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn rolling_back_a_first_apply_stops_the_site_and_forgets_the_app() {
+        let dir = site_folder();
+        let mut host = Host::new(target());
+        let plan = host
+            .plan(&manifest(), &config(&dir, "127.0.0.1:0"))
+            .unwrap();
+        let done = host
+            .apply_approved(&plan, &plan.digest(), &MapSecrets::new())
+            .unwrap();
+        let addr = host.target().address(ID).unwrap();
+        let point = done.rollback_point.unwrap();
+        assert_eq!(host.rollback(&point), crate::Rollback::Restored);
+        assert_eq!(host.target().locate(ID), Ok(Presence::Absent));
+        assert!(host.target().address(ID).is_none());
+        assert!(
+            host.target()
+                .diagnostics()
+                .contains("stopped the running site")
+        );
+        assert!(std::net::TcpStream::connect(addr).is_err());
+    }
+
+    #[test]
+    fn restoring_settings_with_nothing_to_serve_stops_the_site() {
+        let dir = site_folder();
+        let mut t = target();
+        let set = |name: &str, value: String| Step::SetSetting {
+            name: name.into(),
+            value,
+        };
+        t.apply_step(ID, &Step::Create, None).unwrap();
+        let bare = t.snapshot(ID).unwrap();
+        t.apply_step(ID, &set(FILES, dir.path().display().to_string()), None)
+            .unwrap();
+        t.finish_apply(ID).unwrap();
+        let addr = t.address(ID).unwrap();
+        t.restore(ID, &bare).unwrap();
+        assert_eq!(t.locate(ID), Ok(Presence::Ours));
+        assert!(t.address(ID).is_none());
+        assert!(t.observe(ID).unwrap().settings.is_empty());
+        assert!(std::net::TcpStream::connect(addr).is_err());
+    }
+
+    #[test]
+    fn restoring_a_proxy_only_app_starts_it() {
+        let mut t = target();
+        let snapshot = Snapshot {
+            existed: true,
+            observed: Observed {
+                settings: BTreeMap::from([(
+                    PROXY.to_string(),
+                    "/api=http://127.0.0.1:9".to_string(),
+                )]),
+                ..Observed::default()
+            },
+            handle: None,
+        };
+        t.apply_step(ID, &Step::Create, None).unwrap();
+        t.restore(ID, &snapshot).unwrap();
+        assert!(t.address(ID).is_some());
+    }
+
+    #[test]
+    fn restoring_over_a_site_that_is_not_ours_is_refused() {
+        let mut t = target().holding_foreign(ID);
+        let before = t.diagnostics();
+        let snapshot = Snapshot {
+            existed: false,
+            observed: Observed::default(),
+            handle: None,
+        };
+        assert!(matches!(
+            t.restore(ID, &snapshot),
+            Err(Error::NotOurs { .. })
+        ));
+        assert_eq!(t.diagnostics(), before);
+        assert_eq!(t.locate(ID), Ok(Presence::NotOurs));
     }
 
     #[test]
