@@ -157,11 +157,18 @@ impl<R: Rest> RenderTarget<R> {
 
     /// Wait for a deploy to be live. A failed deploy is an error; running out of reads is `TimedOut`, never success.
     fn wait_live(&self, service_id: &str, deploy_id: &str) -> Result<(), Error> {
+        let mut last_word = String::new();
         for attempt in 0..self.pacing.attempts {
             if attempt > 0 {
                 (self.pacing.pause)();
             }
-            match self.api.deploy(service_id, deploy_id)?.status {
+            let seen = self.api.deploy(service_id, deploy_id)?;
+            if seen.word != last_word {
+                // Noted when it changes, so a run that times out says what Render last reported.
+                self.note(&format!("deploy status: {}", seen.word));
+                last_word = seen.word.clone();
+            }
+            match seen.status {
                 DeployStatus::Live => return Ok(()),
                 DeployStatus::Failed(word) => {
                     return Err(Error::Target(format!("the deploy ended as {word}")));
@@ -1169,6 +1176,32 @@ mod tests {
             t.apply_step("my-app", &Step::Create, None),
             Err(Error::TimedOut { .. })
         ));
+    }
+
+    #[test]
+    fn a_timed_out_deploy_leaves_the_last_status_it_saw_in_the_diagnostics_once_per_change() {
+        let s = Server::default();
+        s.never_live.set(true);
+        let mut t = target(s);
+        let _ = t.apply_step("my-app", &Step::Create, None);
+        let log = t.diagnostics();
+        assert_eq!(
+            log.matches("deploy status: build_in_progress").count(),
+            1,
+            "a status is noted when it changes, not on every read: {log}"
+        );
+    }
+
+    #[test]
+    fn a_status_word_this_crate_does_not_know_is_recorded_as_it_came() {
+        let s = Server::default();
+        *s.deploy_ends_as.borrow_mut() = Some("some_new_status".to_string());
+        let mut t = target(s);
+        assert!(matches!(
+            t.apply_step("my-app", &Step::Create, None),
+            Err(Error::TimedOut { .. })
+        ));
+        assert!(t.diagnostics().contains("some_new_status"));
     }
 
     #[test]
