@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.50] - 2026-11-10
+
+- Conformance suite: `Profile` and `run_with(&Profile, make)`. The suite's app is no longer fixed to a `BASE_URL` setting and an `API_TOKEN` secret: a target that accepts only certain setting names (a local server: `FILES`, `BIND`) or holds no secrets passes its own profile; the checks that need a secret are skipped for a profile without one, and a by-hand `SetSecret` must still be an `Unsupported` error. `run(make)` is `run_with(&Profile::default(), make)`, so every existing caller is unchanged. Not breaking (additive). Three mutations of the new code survive as equivalent (the independent read-back lines are shadowed by the host's own read-back; the secretless leak check has no secret to leak). Prepares C8b (`LocalTarget`). Version provisional; the PM allocates.
+
 ## [0.0.49] - 2026-11-10
 
 - Row C7a: feature `secretant` (optional `secretant` 0.0.2) and `SecretAntSecrets`, a `Secrets` source over a getter that returns SecretAnt's `SecretValue`. A value that is not UTF-8 gives no value (no lossy copy), an empty value gives no value, `Debug` shows no value. The store (C7b) waits for SecretAnt; our `SecretValue` stays text (no breaking swap). Four mutations (lossy text, empty allowed, name ignored, Debug shows a value) each fail a test. Version provisional; the PM allocates.

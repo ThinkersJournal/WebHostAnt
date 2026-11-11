@@ -38,9 +38,9 @@ pub enum Scenario {
     SecretsUnsupported,
     /// Every call to the host fails, as if the network were down or the credential refused.
     Unreachable,
-    /// Nothing deployed. Of the three steps of the suite's plan (create, one setting, one secret), the third fails once; a second try works.
+    /// Nothing deployed. The last step of the suite's plan (create, one setting, and one secret if the [`Profile`] has one) fails once; a second try works.
     FailsLastStepOnce,
-    /// Nothing deployed. Every call to the host fails once all three steps of the suite's plan have been applied.
+    /// Nothing deployed. Every call to the host fails once every step of the suite's plan has been applied.
     DropsAfterApply,
 }
 
@@ -53,21 +53,49 @@ pub struct Failure {
     pub detail: String,
 }
 
-fn manifest() -> AppManifest {
-    AppManifest::new("conformance-app")
-        .setting("BASE_URL")
-        .secret("API_TOKEN")
+/// What the suite's one app is made of: one plain setting and, if the target can hold secrets, one secret. The default is a setting called
+/// `BASE_URL` and a secret called `API_TOKEN`. A target that accepts only certain setting names (a local server takes `FILES` and `BIND`, not
+/// `BASE_URL`) or that holds no secrets passes its own [`Profile`] to [`run_with`]; checks for an operation the target declares `No` are skipped
+/// (the target still has to refuse it as an error, which a check proves).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Profile {
+    /// The setting the suite sets and reads back.
+    pub setting: (String, String),
+    /// The secret the suite sets, or `None` for a target that holds no secrets.
+    pub secret: Option<String>,
 }
 
-fn config() -> Config {
-    Config::from([(
-        "BASE_URL".to_string(),
-        "https://example.invalid".to_string(),
-    )])
+impl Default for Profile {
+    fn default() -> Self {
+        Self {
+            setting: (
+                "BASE_URL".to_string(),
+                "https://example.invalid".to_string(),
+            ),
+            secret: Some("API_TOKEN".to_string()),
+        }
+    }
 }
 
-fn secrets() -> MapSecrets {
-    MapSecrets::new().with("API_TOKEN", CANARY)
+impl Profile {
+    fn manifest(&self) -> AppManifest {
+        let m = AppManifest::new("conformance-app").setting(&self.setting.0);
+        match &self.secret {
+            Some(name) => m.secret(name),
+            None => m,
+        }
+    }
+
+    fn config(&self) -> Config {
+        Config::from([self.setting.clone()])
+    }
+
+    fn secrets(&self) -> MapSecrets {
+        match &self.secret {
+            Some(name) => MapSecrets::new().with(name, CANARY),
+            None => MapSecrets::new(),
+        }
+    }
 }
 
 fn fail(out: &mut Vec<Failure>, check: &'static str, detail: impl Into<String>) {
@@ -77,27 +105,32 @@ fn fail(out: &mut Vec<Failure>, check: &'static str, detail: impl Into<String>) 
     });
 }
 
-/// Run every check. `make` builds a fresh target for a scenario. An empty result means the target keeps the contract.
+/// Run every check with the default [`Profile`]. `make` builds a fresh target for a scenario. An empty result means the target keeps the contract.
 pub fn run<T: Target>(make: impl Fn(Scenario) -> T) -> Vec<Failure> {
+    run_with(&Profile::default(), make)
+}
+
+/// Run every check with the app described by `p`. See [`Profile`].
+pub fn run_with<T: Target>(p: &Profile, make: impl Fn(Scenario) -> T) -> Vec<Failure> {
     let mut out = Vec::new();
-    plan_is_inert(&make, &mut out);
-    apply_is_proven_and_idempotent(&make, &mut out);
-    no_secret_leaks(&make, &mut out);
-    missing_secret_acts_nothing(&make, &mut out);
-    not_ours_is_refused(&make, &mut out);
-    unsupported_is_an_error(&make, &mut out);
-    unreachable_is_never_absent(&make, &mut out);
-    undo_is_stated_up_front(&make, &mut out);
-    failed_apply_is_visible_and_resumable(&make, &mut out);
-    rollback_restores_the_snapshot(&make, &mut out);
-    failed_apply_can_be_rolled_back(&make, &mut out);
-    rollback_never_claims_more_than_it_knows(&make, &mut out);
-    tls_status_is_read_never_made_up(&make, &mut out);
-    domains_are_bound_and_read_back(&make, &mut out);
+    plan_is_inert(p, &make, &mut out);
+    apply_is_proven_and_idempotent(p, &make, &mut out);
+    no_secret_leaks(p, &make, &mut out);
+    missing_secret_acts_nothing(p, &make, &mut out);
+    not_ours_is_refused(p, &make, &mut out);
+    unsupported_is_an_error(p, &make, &mut out);
+    unreachable_is_never_absent(p, &make, &mut out);
+    undo_is_stated_up_front(p, &make, &mut out);
+    failed_apply_is_visible_and_resumable(p, &make, &mut out);
+    rollback_restores_the_snapshot(p, &make, &mut out);
+    failed_apply_can_be_rolled_back(p, &make, &mut out);
+    rollback_never_claims_more_than_it_knows(p, &make, &mut out);
+    tls_status_is_read_never_made_up(p, &make, &mut out);
+    domains_are_bound_and_read_back(p, &make, &mut out);
     out
 }
 
-fn plan_is_inert<T: Target>(make: &impl Fn(Scenario) -> T, out: &mut Vec<Failure>) {
+fn plan_is_inert<T: Target>(p: &Profile, make: &impl Fn(Scenario) -> T, out: &mut Vec<Failure>) {
     const C: &str = "plan is inert";
     let host = Host::new(make(Scenario::Empty));
     let before = (
@@ -105,7 +138,7 @@ fn plan_is_inert<T: Target>(make: &impl Fn(Scenario) -> T, out: &mut Vec<Failure
         host.target().observe("conformance-app"),
         host.target().diagnostics(),
     );
-    match host.plan(&manifest(), &config()) {
+    match host.plan(&p.manifest(), &p.config()) {
         Ok(plan) if plan.is_empty() => fail(out, C, "an empty target produced an empty plan"),
         Ok(_) => {}
         Err(e) => return fail(out, C, format!("planning failed: {e}")),
@@ -124,23 +157,24 @@ fn plan_is_inert<T: Target>(make: &impl Fn(Scenario) -> T, out: &mut Vec<Failure
 }
 
 fn apply_is_proven_and_idempotent<T: Target>(
+    p: &Profile,
     make: &impl Fn(Scenario) -> T,
     out: &mut Vec<Failure>,
 ) {
     const C: &str = "apply is proven by read-back, and idempotent";
     let mut host = Host::new(make(Scenario::Empty));
-    let plan = match host.plan(&manifest(), &config()) {
+    let plan = match host.plan(&p.manifest(), &p.config()) {
         Ok(p) => p,
         Err(e) => return fail(out, C, format!("planning failed: {e}")),
     };
-    if let Err(e) = host.apply(&plan, &secrets()) {
+    if let Err(e) = host.apply(&plan, &p.secrets()) {
         return fail(out, C, format!("apply failed: {e}"));
     }
     // Independent of the host's own verification: ask the target directly.
     match host.target().observe("conformance-app") {
         Ok(o) => {
-            if o.settings.get("BASE_URL").map(String::as_str) != Some("https://example.invalid")
-                || !o.secret_names.contains("API_TOKEN")
+            if o.settings.get(&p.setting.0) != Some(&p.setting.1)
+                || p.secret.iter().any(|n| !o.secret_names.contains(n))
                 || !o.healthy
             {
                 fail(
@@ -153,7 +187,7 @@ fn apply_is_proven_and_idempotent<T: Target>(
         Err(e) => return fail(out, C, format!("observe failed: {e}")),
     }
     let settled = host.target().observe("conformance-app");
-    match host.plan(&manifest(), &config()) {
+    match host.plan(&p.manifest(), &p.config()) {
         Ok(p) if !p.is_empty() => fail(
             out,
             C,
@@ -162,7 +196,7 @@ fn apply_is_proven_and_idempotent<T: Target>(
         Ok(_) => {}
         Err(e) => return fail(out, C, format!("second plan failed: {e}")),
     }
-    if let Err(e) = host.apply(&plan, &secrets()) {
+    if let Err(e) = host.apply(&plan, &p.secrets()) {
         return fail(out, C, format!("re-applying the same plan failed: {e}"));
     }
     if host.target().observe("conformance-app") != settled {
@@ -170,14 +204,17 @@ fn apply_is_proven_and_idempotent<T: Target>(
     }
 }
 
-fn no_secret_leaks<T: Target>(make: &impl Fn(Scenario) -> T, out: &mut Vec<Failure>) {
+fn no_secret_leaks<T: Target>(p: &Profile, make: &impl Fn(Scenario) -> T, out: &mut Vec<Failure>) {
     const C: &str = "no secret leaks";
+    if p.secret.is_none() {
+        return;
+    }
     let mut host = Host::new(make(Scenario::Empty));
-    let plan = match host.plan(&manifest(), &config()) {
+    let plan = match host.plan(&p.manifest(), &p.config()) {
         Ok(p) => p,
         Err(e) => return fail(out, C, format!("planning failed: {e}")),
     };
-    let applied = host.apply(&plan, &secrets());
+    let applied = host.apply(&plan, &p.secrets());
     let surfaces = [
         ("plan display", plan.to_string()),
         ("plan debug", format!("{plan:?}")),
@@ -187,7 +224,13 @@ fn no_secret_leaks<T: Target>(make: &impl Fn(Scenario) -> T, out: &mut Vec<Failu
             "observed state",
             format!("{:?}", host.target().observe("conformance-app")),
         ),
-        ("secret debug", format!("{:?}", secrets().get("API_TOKEN"))),
+        (
+            "secret debug",
+            format!(
+                "{:?}",
+                p.secrets().get(p.secret.as_deref().unwrap_or_default())
+            ),
+        ),
     ];
     for (name, text) in surfaces {
         if text.contains(CANARY) {
@@ -196,10 +239,17 @@ fn no_secret_leaks<T: Target>(make: &impl Fn(Scenario) -> T, out: &mut Vec<Failu
     }
 }
 
-fn missing_secret_acts_nothing<T: Target>(make: &impl Fn(Scenario) -> T, out: &mut Vec<Failure>) {
+fn missing_secret_acts_nothing<T: Target>(
+    p: &Profile,
+    make: &impl Fn(Scenario) -> T,
+    out: &mut Vec<Failure>,
+) {
     const C: &str = "a missing secret changes nothing";
+    let Some(secret) = &p.secret else {
+        return;
+    };
     let mut host = Host::new(make(Scenario::Empty));
-    let plan = match host.plan(&manifest(), &config()) {
+    let plan = match host.plan(&p.manifest(), &p.config()) {
         Ok(p) => p,
         Err(e) => return fail(out, C, format!("planning failed: {e}")),
     };
@@ -208,7 +258,7 @@ fn missing_secret_acts_nothing<T: Target>(make: &impl Fn(Scenario) -> T, out: &m
         host.target().diagnostics(),
     );
     match host.apply(&plan, &MapSecrets::new()) {
-        Err(Error::MissingSecret { name }) if name == "API_TOKEN" => {}
+        Err(Error::MissingSecret { name }) if &name == secret => {}
         other => fail(out, C, format!("expected MissingSecret, got {other:?}")),
     }
     let after = (
@@ -220,16 +270,20 @@ fn missing_secret_acts_nothing<T: Target>(make: &impl Fn(Scenario) -> T, out: &m
     }
 }
 
-fn not_ours_is_refused<T: Target>(make: &impl Fn(Scenario) -> T, out: &mut Vec<Failure>) {
+fn not_ours_is_refused<T: Target>(
+    p: &Profile,
+    make: &impl Fn(Scenario) -> T,
+    out: &mut Vec<Failure>,
+) {
     const C: &str = "a target that is not ours is never overwritten";
     let mut host = Host::new(make(Scenario::HoldsOtherApp));
-    match host.plan(&manifest(), &config()) {
+    match host.plan(&p.manifest(), &p.config()) {
         Err(Error::NotOurs { .. }) => {}
         other => fail(out, C, format!("plan: expected NotOurs, got {other:?}")),
     }
     let by_hand = crate::Plan::new("conformance-app", vec![Step::Create]);
     let before = host.target().diagnostics();
-    match host.apply(&by_hand, &secrets()) {
+    match host.apply(&by_hand, &p.secrets()) {
         Err(Error::NotOurs { .. }) => {}
         other => fail(out, C, format!("apply: expected NotOurs, got {other:?}")),
     }
@@ -238,27 +292,42 @@ fn not_ours_is_refused<T: Target>(make: &impl Fn(Scenario) -> T, out: &mut Vec<F
     }
 }
 
-fn unsupported_is_an_error<T: Target>(make: &impl Fn(Scenario) -> T, out: &mut Vec<Failure>) {
+fn unsupported_is_an_error<T: Target>(
+    p: &Profile,
+    make: &impl Fn(Scenario) -> T,
+    out: &mut Vec<Failure>,
+) {
     const C: &str = "an unsupported operation is an error";
-    let mut host = Host::new(make(Scenario::SecretsUnsupported));
+    // A target with no secrets of its own is its own "unsupported" case; one that has them is asked through its SecretsUnsupported scenario.
+    let scenario = if p.secret.is_some() {
+        Scenario::SecretsUnsupported
+    } else {
+        Scenario::Empty
+    };
+    let mut host = Host::new(make(scenario));
     if host.target().supports(crate::Op::SetSecret) == Support::Yes {
+        if p.secret.is_none() {
+            return;
+        }
         return fail(out, C, "the SecretsUnsupported scenario still says Yes");
     }
-    match host.plan(&manifest(), &config()) {
-        Err(Error::Unsupported {
-            op: crate::Op::SetSecret,
-            ..
-        }) => {}
-        other => fail(out, C, format!("expected Unsupported, got {other:?}")),
+    if p.secret.is_some() {
+        match host.plan(&p.manifest(), &p.config()) {
+            Err(Error::Unsupported {
+                op: crate::Op::SetSecret,
+                ..
+            }) => {}
+            other => fail(out, C, format!("expected Unsupported, got {other:?}")),
+        }
     }
     let by_hand = crate::Plan::new(
         "conformance-app",
         vec![Step::SetSecret {
-            name: "API_TOKEN".to_string(),
+            name: p.secret.clone().unwrap_or_else(|| "A_SECRET".to_string()),
         }],
     );
     let before = host.target().diagnostics();
-    match host.apply(&by_hand, &secrets()) {
+    match host.apply(&by_hand, &p.secrets()) {
         Err(Error::Unsupported { .. }) => {}
         other => fail(
             out,
@@ -271,14 +340,18 @@ fn unsupported_is_an_error<T: Target>(make: &impl Fn(Scenario) -> T, out: &mut V
     }
 }
 
-fn unreachable_is_never_absent<T: Target>(make: &impl Fn(Scenario) -> T, out: &mut Vec<Failure>) {
+fn unreachable_is_never_absent<T: Target>(
+    p: &Profile,
+    make: &impl Fn(Scenario) -> T,
+    out: &mut Vec<Failure>,
+) {
     const C: &str = "an unreachable host is never reported as not installed";
     let mut host = Host::new(make(Scenario::Unreachable));
     match host.target().locate("conformance-app") {
         Err(_) => {}
         other => fail(out, C, format!("locate: expected an error, got {other:?}")),
     }
-    match host.plan(&manifest(), &config()) {
+    match host.plan(&p.manifest(), &p.config()) {
         Err(_) => {}
         Ok(plan) => fail(
             out,
@@ -290,19 +363,23 @@ fn unreachable_is_never_absent<T: Target>(make: &impl Fn(Scenario) -> T, out: &m
         ),
     }
     let by_hand = crate::Plan::new("conformance-app", vec![Step::Create]);
-    if host.apply(&by_hand, &secrets()).is_ok() {
+    if host.apply(&by_hand, &p.secrets()).is_ok() {
         fail(out, C, "apply reported success without reaching the host");
     }
 }
 
-fn undo_is_stated_up_front<T: Target>(make: &impl Fn(Scenario) -> T, out: &mut Vec<Failure>) {
+fn undo_is_stated_up_front<T: Target>(
+    p: &Profile,
+    make: &impl Fn(Scenario) -> T,
+    out: &mut Vec<Failure>,
+) {
     const C: &str = "whether an apply can be undone is stated before it runs";
     let mut host = Host::new(make(Scenario::Empty));
     let can = host.target().supports(crate::Op::Restore) == Support::Yes;
     if host.can_roll_back() != can {
         fail(out, C, "Host::can_roll_back disagrees with the target");
     }
-    let plan = match host.plan(&manifest(), &config()) {
+    let plan = match host.plan(&p.manifest(), &p.config()) {
         Ok(p) => p,
         Err(e) => return fail(out, C, format!("planning failed: {e}")),
     };
@@ -312,7 +389,7 @@ fn undo_is_stated_up_front<T: Target>(make: &impl Fn(Scenario) -> T, out: &mut V
     if !can && !plan.to_string().contains("cannot undo") {
         fail(out, C, "the plan does not say that it cannot be undone");
     }
-    match host.apply(&plan, &secrets()) {
+    match host.apply(&plan, &p.secrets()) {
         Ok(applied) if applied.rollback_point.is_some() != can => fail(
             out,
             C,
@@ -324,17 +401,18 @@ fn undo_is_stated_up_front<T: Target>(make: &impl Fn(Scenario) -> T, out: &mut V
 }
 
 fn failed_apply_is_visible_and_resumable<T: Target>(
+    p: &Profile,
     make: &impl Fn(Scenario) -> T,
     out: &mut Vec<Failure>,
 ) {
     const C: &str = "a failed apply says which steps ran, and a re-run finishes it";
     let mut host = Host::new(make(Scenario::FailsLastStepOnce));
-    let plan = match host.plan(&manifest(), &config()) {
+    let plan = match host.plan(&p.manifest(), &p.config()) {
         Ok(p) => p,
         Err(e) => return fail(out, C, format!("planning failed: {e}")),
     };
     let total = plan.steps().len();
-    match host.apply(&plan, &secrets()) {
+    match host.apply(&plan, &p.secrets()) {
         Err(Error::ApplyFailed { steps, .. }) => {
             let mut expected = vec![StepOutcome::Applied; total];
             expected[total - 1] = StepOutcome::Failed;
@@ -344,14 +422,14 @@ fn failed_apply_is_visible_and_resumable<T: Target>(
         }
         other => return fail(out, C, format!("expected ApplyFailed, got {other:?}")),
     }
-    match host.plan(&manifest(), &config()) {
+    match host.plan(&p.manifest(), &p.config()) {
         Ok(again) if again.steps().len() >= total => fail(
             out,
             C,
             "a re-plan after a partial apply repeats finished steps",
         ),
         Ok(again) => {
-            if let Err(e) = host.apply(&again, &secrets()) {
+            if let Err(e) = host.apply(&again, &p.secrets()) {
                 fail(out, C, format!("the re-run did not finish: {e}"));
             }
         }
@@ -364,6 +442,7 @@ fn gone<T: Target>(host: &Host<T>) -> bool {
 }
 
 fn rollback_restores_the_snapshot<T: Target>(
+    p: &Profile,
     make: &impl Fn(Scenario) -> T,
     out: &mut Vec<Failure>,
 ) {
@@ -372,12 +451,12 @@ fn rollback_restores_the_snapshot<T: Target>(
     if !host.can_roll_back() {
         return;
     }
-    let plan = match host.plan(&manifest(), &config()) {
+    let plan = match host.plan(&p.manifest(), &p.config()) {
         Ok(p) => p,
         Err(e) => return fail(out, C, format!("planning failed: {e}")),
     };
     let Some(point) = host
-        .apply(&plan, &secrets())
+        .apply(&plan, &p.secrets())
         .ok()
         .and_then(|a| a.rollback_point)
     else {
@@ -395,6 +474,7 @@ fn rollback_restores_the_snapshot<T: Target>(
 }
 
 fn failed_apply_can_be_rolled_back<T: Target>(
+    p: &Profile,
     make: &impl Fn(Scenario) -> T,
     out: &mut Vec<Failure>,
 ) {
@@ -403,14 +483,14 @@ fn failed_apply_can_be_rolled_back<T: Target>(
     if !host.can_roll_back() {
         return;
     }
-    let plan = match host.plan(&manifest(), &config()) {
+    let plan = match host.plan(&p.manifest(), &p.config()) {
         Ok(p) => p,
         Err(e) => return fail(out, C, format!("planning failed: {e}")),
     };
     let Err(Error::ApplyFailed {
         rollback_point: Some(point),
         ..
-    }) = host.apply(&plan, &secrets())
+    }) = host.apply(&plan, &p.secrets())
     else {
         return fail(out, C, "the failed apply gave no rollback point");
     };
@@ -425,6 +505,7 @@ fn failed_apply_can_be_rolled_back<T: Target>(
 }
 
 fn rollback_never_claims_more_than_it_knows<T: Target>(
+    p: &Profile,
     make: &impl Fn(Scenario) -> T,
     out: &mut Vec<Failure>,
 ) {
@@ -433,14 +514,14 @@ fn rollback_never_claims_more_than_it_knows<T: Target>(
     if !host.can_roll_back() {
         return;
     }
-    let plan = match host.plan(&manifest(), &config()) {
+    let plan = match host.plan(&p.manifest(), &p.config()) {
         Ok(p) => p,
         Err(e) => return fail(out, C, format!("planning failed: {e}")),
     };
     let Err(Error::ApplyFailed {
         rollback_point: Some(point),
         ..
-    }) = host.apply(&plan, &secrets())
+    }) = host.apply(&plan, &p.secrets())
     else {
         return fail(
             out,
@@ -455,6 +536,7 @@ fn rollback_never_claims_more_than_it_knows<T: Target>(
 }
 
 fn tls_status_is_read_never_made_up<T: Target>(
+    p: &Profile,
     make: &impl Fn(Scenario) -> T,
     out: &mut Vec<Failure>,
 ) {
@@ -478,9 +560,9 @@ fn tls_status_is_read_never_made_up<T: Target>(
             format!("an app that is not deployed returned {s:?}"),
         );
     }
-    match host.plan(&manifest(), &config()) {
+    match host.plan(&p.manifest(), &p.config()) {
         Ok(plan) => {
-            if let Err(e) = host.apply(&plan, &secrets()) {
+            if let Err(e) = host.apply(&plan, &p.secrets()) {
                 return fail(out, C, format!("apply failed: {e}"));
             }
         }
@@ -509,14 +591,15 @@ fn tls_status_is_read_never_made_up<T: Target>(
 }
 
 fn domains_are_bound_and_read_back<T: Target>(
+    p: &Profile,
     make: &impl Fn(Scenario) -> T,
     out: &mut Vec<Failure>,
 ) {
     const C: &str = "a declared domain is bound, proven by read-back, and not bound twice";
-    let app = manifest().domain("app.example.org");
+    let app = p.manifest().domain("app.example.org");
     let mut host = Host::new(make(Scenario::Empty));
     if host.target().supports(crate::Op::BindDomain) != Support::Yes {
-        match host.plan(&app, &config()) {
+        match host.plan(&app, &p.config()) {
             Err(Error::Unsupported { .. }) => {}
             other => fail(
                 out,
@@ -529,7 +612,10 @@ fn domains_are_bound_and_read_back<T: Target>(
         }
         return;
     }
-    match host.plan(&manifest().domain("https://app.example.org/x"), &config()) {
+    match host.plan(
+        &p.manifest().domain("https://app.example.org/x"),
+        &p.config(),
+    ) {
         Err(Error::InvalidDomain { .. }) => {}
         other => fail(
             out,
@@ -540,7 +626,7 @@ fn domains_are_bound_and_read_back<T: Target>(
             ),
         ),
     }
-    let plan = match host.plan(&app, &config()) {
+    let plan = match host.plan(&app, &p.config()) {
         Ok(p) => p,
         Err(e) => return fail(out, C, format!("planning failed: {e}")),
     };
@@ -551,7 +637,7 @@ fn domains_are_bound_and_read_back<T: Target>(
     {
         return fail(out, C, "the plan has no bind step for a declared domain");
     }
-    match host.apply(&plan, &secrets()) {
+    match host.apply(&plan, &p.secrets()) {
         Ok(a) if a.read_back.domains == ["app.example.org"] => {}
         Ok(a) => fail(
             out,
@@ -574,7 +660,7 @@ fn domains_are_bound_and_read_back<T: Target>(
             ),
         ),
     }
-    match host.plan(&app, &config()) {
+    match host.plan(&app, &p.config()) {
         Ok(p) if p.is_empty() => {}
         other => fail(
             out,
@@ -608,6 +694,60 @@ mod tests {
 
     fn checks(fault: Fault) -> Vec<&'static str> {
         run(build(fault)).into_iter().map(|f| f.check).collect()
+    }
+
+    /// A target that holds no secrets and takes only a `FILES` setting, as a local server would.
+    fn secretless(fault: Fault) -> impl Fn(Scenario) -> FakeTarget {
+        move |scenario| {
+            let t = FakeTarget::new()
+                .with_fault(fault)
+                .with_secrets_support(Support::No);
+            match scenario {
+                Scenario::Empty | Scenario::SecretsUnsupported => t,
+                Scenario::HoldsOtherApp => t.holding_other_app(),
+                Scenario::Unreachable => t.unreachable(),
+                Scenario::FailsLastStepOnce => t.failing_step_once(1),
+                Scenario::DropsAfterApply => t.going_down_after(2),
+            }
+        }
+    }
+
+    fn files_profile() -> Profile {
+        Profile {
+            setting: ("FILES".to_string(), "site".to_string()),
+            secret: None,
+        }
+    }
+
+    #[test]
+    fn a_target_without_secrets_passes_with_its_own_profile() {
+        assert_eq!(run_with(&files_profile(), secretless(Fault::None)), vec![]);
+    }
+
+    #[test]
+    fn the_default_profile_still_asks_a_secretless_target_for_a_secret() {
+        // Without its own profile such a target fails: the suite's plan wants a secret it cannot hold.
+        assert!(!run(secretless(Fault::None)).is_empty());
+    }
+
+    #[test]
+    fn faults_are_still_caught_under_a_secretless_profile() {
+        let found = |f| {
+            run_with(&files_profile(), secretless(f))
+                .into_iter()
+                .map(|x| x.check)
+                .collect::<Vec<_>>()
+        };
+        assert!(found(Fault::SilentNoop).contains(&"apply is proven by read-back, and idempotent"));
+        assert!(found(Fault::ActsDuringPlan).contains(&"plan is inert"));
+    }
+
+    #[test]
+    fn the_value_in_the_profile_is_the_one_read_back() {
+        let mut p = files_profile();
+        p.setting.1 = "other".to_string();
+        let seen = run_with(&p, secretless(Fault::None));
+        assert_eq!(seen, vec![]);
     }
 
     #[test]
@@ -667,9 +807,11 @@ mod tests {
     #[test]
     fn a_restore_that_does_nothing_reads_back_as_unknown() {
         let mut host = Host::new(FakeTarget::new().with_fault(Fault::RestoreDoesNothing));
-        let plan = host.plan(&manifest(), &config()).unwrap();
+        let plan = host
+            .plan(&Profile::default().manifest(), &Profile::default().config())
+            .unwrap();
         let point = host
-            .apply(&plan, &secrets())
+            .apply(&plan, &Profile::default().secrets())
             .unwrap()
             .rollback_point
             .unwrap();
@@ -684,7 +826,7 @@ mod tests {
         let mut host = Host::new(FakeTarget::new());
         let plan = crate::Plan::new("conformance-app", vec![]);
         let point = host
-            .apply(&plan, &secrets())
+            .apply(&plan, &Profile::default().secrets())
             .err()
             .and_then(|e| match e {
                 Error::ApplyFailed { rollback_point, .. } => rollback_point,
