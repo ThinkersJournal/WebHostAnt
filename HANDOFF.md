@@ -11,15 +11,14 @@ lane's work order; ack each once; use `key=value` headers (MESSAGE-FORMATS). Doc
 - Main has: Cloudflare adapter, Render adapter (REST, deploy once at the end of an apply), conformance suite, EnvSecrets, `local` feature
   (C8a: `ReadTls` from a real handshake), configurant 0.7.2, httpant-client 0.7.1. Cloudflare D6 real test PASSED (PM, by hand). Render real run
   PASSED at run 3 (PM); what it does NOT show is in `docs/RENDER-FACTS.md`.
-- Open PRs (merge order by the PM's gate): this PR, C7a `SecretAntSecrets` (0.0.49, `c7a-secretant-source`, worktree `../WebHostAnt-wt-c7a`); then the
-  conformance `Profile` PR (0.0.50, `conformance-skip-no`, worktree `../WebHostAnt-wt-conf-skip`). #47 (Render example) is merged.
+- Open PRs (merge order by the PM's gate): #49 conformance `Profile` (0.0.50, `conformance-skip-no`, worktree `../WebHostAnt-wt-conf-skip`); then this PR,
+  C8b `LocalTarget` (0.0.51, `c8b-local-target`, worktree `../WebHostAnt-wt-c8b`, stacked on #49).
 - When a PR merges: `git status --porcelain` in its worktree, `git worktree remove`, `git worktree prune`, `git branch -D`, confirm the remote branch
   is absent, fast-forward the primary. A stacked branch moves with `git rebase --onto origin/main <old base tip>`, never a merge; `--force-with-lease`
   on own branches only. Check the result is one commit and its tree matches the tested one.
 
 ## Next (no WAIT lines)
-1. C8b `LocalTarget` (webservant 0.4.4; see ROADMAP): Create/SetSetting build a Settings/Site, observe reads back, loopback default, conformance suite.
-   Then C8c (Restore). C8d needs the PM's go ([ASK]) before any Let's Encrypt staging run. C8e never installs without an approved digest.
+1. C8c (Restore for LocalTarget; ROADMAP). Then C8d. C8d needs the PM's go ([ASK]) before any Let's Encrypt staging run. C8e never installs without an approved digest.
 2. C7b waits for SecretAnt's store (row 1 slice 2). No breaking `SecretValue` swap now (PM agreed).
 3. Open real-account gaps: Cloudflare containers/domains/ReadTls/API-token paths; Render domains/ReadTls. Each run needs an [ASK] first.
 

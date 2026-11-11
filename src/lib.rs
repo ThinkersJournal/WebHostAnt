@@ -16,6 +16,8 @@ pub mod conformance;
 pub mod fake;
 #[cfg(feature = "local")]
 pub mod local;
+#[cfg(feature = "local")]
+pub mod local_target;
 pub mod preflight;
 pub mod render;
 pub mod render_target;
