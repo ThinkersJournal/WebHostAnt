@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.56] — Raise httpant-client to 0.7.10
+
+The PM asked for the repin after httpant 0.7.10 (core, server, client) was published. `httpant-client` 0.7.1 to 0.7.10 (it also brings `httpant-core` 0.7.10 and `ipnet` into `Cargo.lock`); the 0.5.22 copies that remain come in through the published `webservant` 0.4.4, which is unchanged. Verified by the test suite with and without `--features local`. Not breaking.
+
 ## [0.0.55] — C8d: `ACME_CONTACT` opts in to a non-loopback `BIND` and `HTTP_BIND`
 
 Row C8d, PM ruling option A. A `LocalTarget` app that already holds `ACME_CONTACT` may set a `BIND` or `HTTP_BIND` beyond loopback (a certificate authority must reach port 80); without it, or `allow_non_loopback`, the setting is still refused at apply. Order matters: `ACME_CONTACT` first. The default authority stays Let's Encrypt staging. Verified by the changed refusal test (refused without the contact, accepted after it, refused if the contact comes after). Not breaking. No network, no real CA.
