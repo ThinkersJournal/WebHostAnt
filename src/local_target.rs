@@ -8,7 +8,7 @@
 //! has no environment and no secret store):
 //!
 //! * `FILES`: the folder to serve.
-//! * `BIND`: where to listen, as `ip:port`. It must be a loopback address unless [`LocalTarget::allow_non_loopback`] was called. Without it the
+//! * `BIND`: where to listen, as `ip:port`. It must be a loopback address unless [`LocalTarget::allow_non_loopback`] was called or `ACME_CONTACT` is already held (the explicit opt-in to automatic certificates, which need port 80). Without it the
 //!   site listens on `127.0.0.1` at a free port.
 //! * `PROXY`: one forwarded path, as `/prefix=http://upstream`.
 //!
@@ -145,7 +145,7 @@ impl LocalTarget {
             .map(RunningSite::addr)
     }
 
-    fn check(&self, name: &str, value: &str) -> Result<(), Error> {
+    fn check(&self, app_id: &str, name: &str, value: &str) -> Result<(), Error> {
         match name {
             FILES if value.trim().is_empty() => Err(refuse(FILES, "is empty")),
             FILES => Ok(()),
@@ -153,10 +153,17 @@ impl LocalTarget {
                 let addr: SocketAddr = value
                     .parse()
                     .map_err(|_| refuse(name, "is not `ip:port`"))?;
-                if !addr.ip().is_loopback() && !self.non_loopback {
+                // `ACME_CONTACT` is the explicit opt-in to listening beyond this machine (PM ruling, option A): a certificate authority has to
+                // reach port 80. It must already be held, so set it before a wide `BIND`.
+                let opted_in = self.non_loopback
+                    || self
+                        .apps
+                        .get(app_id)
+                        .is_some_and(|a| a.settings.contains_key(ACME_CONTACT));
+                if !addr.ip().is_loopback() && !opted_in {
                     return Err(refuse(
                         name,
-                        "is not a loopback address (call `allow_non_loopback` to listen beyond this machine)",
+                        "is not a loopback address (set `ACME_CONTACT` first, or call `allow_non_loopback`, to listen beyond this machine)",
                     ));
                 }
                 Ok(())
@@ -353,7 +360,7 @@ impl Target for LocalTarget {
                 Ok(())
             }
             Step::SetSetting { name, value } => {
-                self.check(name, value)?;
+                self.check(app_id, name, value)?;
                 let app = self
                     .apps
                     .get_mut(app_id)
@@ -655,6 +662,21 @@ mod tests {
         let mut open = target().allow_non_loopback();
         open.apply_step(ID, &Step::Create, None).unwrap();
         open.apply_step(ID, &wide, None).unwrap();
+        // `ACME_CONTACT` held first is the other opt-in; set after the wide bind it does not rescue it.
+        let contact = Step::SetSetting {
+            name: ACME_CONTACT.into(),
+            value: "ops@example.org".into(),
+        };
+        let mut acme = target();
+        acme.apply_step(ID, &Step::Create, None).unwrap();
+        assert!(acme.apply_step(ID, &wide, None).is_err());
+        acme.apply_step(ID, &contact, None).unwrap();
+        acme.apply_step(ID, &wide, None).unwrap();
+        let http_wide = Step::SetSetting {
+            name: HTTP_BIND.into(),
+            value: "0.0.0.0:80".into(),
+        };
+        acme.apply_step(ID, &http_wide, None).unwrap();
         let bad = Step::SetSetting {
             name: BIND.into(),
             value: "not-an-address".into(),
