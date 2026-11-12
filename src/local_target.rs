@@ -12,7 +12,8 @@
 //!   site listens on `127.0.0.1` at a free port.
 //! * `PROXY`: one forwarded path, as `/prefix=http://upstream`.
 //!
-//! Secrets, domains and certificates are declared `No` here (automatic certificates are row C8d). `Restore` (row C8c) puts the settings back to a
+//! `HTTP_BIND` and the `ACME_*` settings (row C8d) turn on automatic certificates: `ACME_CONTACT` is the switch, Let's Encrypt STAGING the default
+//! authority. Secrets and domains are declared `No` here. `Restore` (row C8c) puts the settings back to a
 //! snapshot and restarts the site from them, or stops the site and forgets the app when it did not exist before.
 //!
 //! The target owns a small thread runtime that keeps the site alive between calls, and dropping the target stops every site. Do not call it from
@@ -21,16 +22,43 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 
-use webservant::{RunningSite, Settings, Site};
+use webservant::{Acme, AcmeClient, Reachability, RunningSite, Settings, Site};
 
 use crate::{
     Error, Health, HealthProbe, Observed, Op, Presence, SecretValue, Snapshot, Step, Support,
-    Target,
+    Target, TlsStatus,
 };
 
 const FILES: &str = "FILES";
 const BIND: &str = "BIND";
 const PROXY: &str = "PROXY";
+const HTTP_BIND: &str = "HTTP_BIND";
+const ACME_CONTACT: &str = "ACME_CONTACT";
+const ACME_STAGING: &str = "ACME_STAGING";
+const ACME_DIRECTORY: &str = "ACME_DIRECTORY";
+const ACME_ROOT: &str = "ACME_ROOT";
+const ACME_STORE: &str = "ACME_STORE";
+const ACME_NAMES: &str = "ACME_NAMES";
+
+/// Lets one certificate authority client be shared between the sites a target starts (each start needs its own boxed client).
+struct SharedClient(std::sync::Arc<dyn AcmeClient>);
+
+impl AcmeClient for SharedClient {
+    fn obtain<'a>(
+        &'a self,
+        names: &'a [String],
+        challenges: &'a webservant::Challenges,
+        kind: webservant::ChallengeKind,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<webservant::Issued, webservant::AcmeError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        self.0.obtain(names, challenges, kind)
+    }
+}
 
 struct App {
     /// Created by this target. `false` for an id the caller declared taken by something else.
@@ -47,6 +75,7 @@ pub struct LocalTarget {
     health_path: String,
     trusted: BTreeSet<Op>,
     non_loopback: bool,
+    acme_client: Option<std::sync::Arc<dyn AcmeClient>>,
 }
 
 impl LocalTarget {
@@ -64,6 +93,7 @@ impl LocalTarget {
             health_path: "/".to_string(),
             trusted: BTreeSet::new(),
             non_loopback: false,
+            acme_client: None,
         })
     }
 
@@ -83,6 +113,13 @@ impl LocalTarget {
     /// Allow `BIND` to name an address that is not loopback (it then listens beyond this machine). Off by default.
     pub fn allow_non_loopback(mut self) -> Self {
         self.non_loopback = true;
+        self
+    }
+
+    /// Ask this certificate authority client instead of the built-in one, for every site with `ACME_CONTACT` set. This is how a test supplies a
+    /// fake CA (WebServAnt's own seam); a real run does not call it.
+    pub fn with_acme_client(mut self, client: impl AcmeClient) -> Self {
+        self.acme_client = Some(std::sync::Arc::new(client));
         self
     }
 
@@ -112,18 +149,30 @@ impl LocalTarget {
         match name {
             FILES if value.trim().is_empty() => Err(refuse(FILES, "is empty")),
             FILES => Ok(()),
-            BIND => {
+            BIND | HTTP_BIND => {
                 let addr: SocketAddr = value
                     .parse()
-                    .map_err(|_| refuse(BIND, "is not `ip:port`"))?;
+                    .map_err(|_| refuse(name, "is not `ip:port`"))?;
                 if !addr.ip().is_loopback() && !self.non_loopback {
                     return Err(refuse(
-                        BIND,
+                        name,
                         "is not a loopback address (call `allow_non_loopback` to listen beyond this machine)",
                     ));
                 }
                 Ok(())
             }
+            ACME_CONTACT if value.contains('@') && !value.contains(char::is_whitespace) => Ok(()),
+            ACME_CONTACT => Err(refuse(ACME_CONTACT, "is not an email address")),
+            ACME_STAGING if matches!(value, "true" | "false") => Ok(()),
+            ACME_STAGING => Err(refuse(ACME_STAGING, "is not `true` or `false`")),
+            ACME_DIRECTORY if value.starts_with("https://") || value.starts_with("http://") => {
+                Ok(())
+            }
+            ACME_DIRECTORY => Err(refuse(ACME_DIRECTORY, "is not a URL")),
+            ACME_ROOT | ACME_STORE if !value.trim().is_empty() => Ok(()),
+            ACME_ROOT | ACME_STORE => Err(refuse(name, "is empty")),
+            ACME_NAMES if value.split(',').all(|n| !n.trim().is_empty()) => Ok(()),
+            ACME_NAMES => Err(refuse(ACME_NAMES, "has an empty name in its list")),
             PROXY => match value.split_once('=') {
                 Some((prefix, upstream))
                     if prefix.starts_with('/') && upstream.starts_with("http") =>
@@ -133,9 +182,62 @@ impl LocalTarget {
                 _ => Err(refuse(PROXY, "is not `/prefix=http://upstream`")),
             },
             other => Err(Error::Target(format!(
-                "`{other}` is not a setting a local site takes (FILES, BIND, PROXY); it was not applied"
+                "`{other}` is not a setting a local site takes (FILES, BIND, PROXY, HTTP_BIND and the ACME_* settings); it was not applied"
             ))),
         }
+    }
+
+    /// The site the held settings describe, with automatic certificates when `ACME_CONTACT` is held. Let's Encrypt STAGING unless `ACME_STAGING` is
+    /// `false` or `ACME_DIRECTORY` names another authority: production is never reached by leaving a setting out.
+    fn site_of(&self, app_id: &str, held: &BTreeMap<String, String>) -> Result<Site, Error> {
+        let settings = self.settings_of(app_id, held);
+        let site = Site::from_settings(&settings)
+            .map_err(|e| Error::Target(format!("the settings do not make a site: {e}")))?;
+        let Some(contact) = held.get(ACME_CONTACT) else {
+            return Ok(site);
+        };
+        let mut acme = Acme::new(contact.clone());
+        if let Some(dir) = held.get(ACME_DIRECTORY) {
+            acme = acme.directory(dir.clone());
+        } else if held.get(ACME_STAGING).map(String::as_str) != Some("false") {
+            acme = acme.staging();
+        }
+        if let Some(root) = held.get(ACME_ROOT) {
+            acme = acme.ca_root_pem_file(root);
+        }
+        if let Some(store) = held.get(ACME_STORE) {
+            acme = acme.store(store);
+        }
+        for name in held.get(ACME_NAMES).into_iter().flat_map(|v| v.split(',')) {
+            acme = acme.also_name(name.trim());
+        }
+        if let Some(client) = &self.acme_client {
+            acme = acme.client(SharedClient(std::sync::Arc::clone(client)));
+        }
+        Ok(site.acme(acme))
+    }
+
+    /// Ask "will automatic certificates work here?" with one real issuance against the configured authority (staging by default), using a
+    /// throwaway store, then stop. The app must hold `ACME_CONTACT`. It starts its own listeners at the held `BIND` and `HTTP_BIND`, so with
+    /// fixed ports it must be called before the site is started, not while it runs. An `Err` is a problem with the settings or the listeners;
+    /// the answer about reachability is in the [`Reachability`].
+    pub fn check_reachable(&self, app_id: &str) -> Result<Reachability, Error> {
+        let app = self
+            .apps
+            .get(app_id)
+            .filter(|a| a.ours)
+            .ok_or_else(|| Error::NotOurs {
+                app: app_id.to_string(),
+            })?;
+        if !app.settings.contains_key(ACME_CONTACT) {
+            return Err(Error::Target(format!(
+                "`{ACME_CONTACT}` is not set, so there are no automatic certificates to check"
+            )));
+        }
+        let site = self.site_of(app_id, &app.settings)?;
+        self.runtime
+            .block_on(site.check_reachable())
+            .map_err(|e| Error::Target(format!("the reachability check could not run: {e}")))
     }
 
     fn stop(&mut self, site: RunningSite) -> Result<(), Error> {
@@ -160,6 +262,14 @@ impl LocalTarget {
         if let Some(files) = held.get(FILES) {
             s.files = Some(files.into());
         }
+        // With automatic certificates the plain-HTTP listener (challenge and redirect) also defaults to a free loopback port.
+        if held.contains_key(ACME_CONTACT) {
+            s.http_bind = Some(
+                held.get(HTTP_BIND)
+                    .cloned()
+                    .unwrap_or_else(|| "127.0.0.1:0".to_string()),
+            );
+        }
         if let Some((prefix, upstream)) = held.get(PROXY).and_then(|v| v.split_once('=')) {
             s.proxy.push(webservant::ProxyRoute {
                 prefix: prefix.to_string(),
@@ -182,10 +292,14 @@ impl Target for LocalTarget {
 
     fn supports(&self, op: Op) -> Support {
         match op {
-            Op::Create | Op::SetSetting | Op::Restore if self.trusted.contains(&op) => Support::Yes,
-            Op::Create | Op::SetSetting | Op::Restore => Support::Unverified,
-            // No secret store or environment, and no certificates yet (C8d).
-            Op::SetSecret | Op::DeleteSecret | Op::ReadTls | Op::BindDomain => Support::No,
+            Op::Create | Op::SetSetting | Op::Restore | Op::ReadTls
+                if self.trusted.contains(&op) =>
+            {
+                Support::Yes
+            }
+            Op::Create | Op::SetSetting | Op::Restore | Op::ReadTls => Support::Unverified,
+            // No secret store or environment, and the site's own name is its only domain.
+            Op::SetSecret | Op::DeleteSecret | Op::BindDomain => Support::No,
         }
     }
 
@@ -265,9 +379,7 @@ impl Target for LocalTarget {
             return Ok(());
         };
         // Nothing changed and it is serving: leave it be.
-        let settings = self.settings_of(app_id, &app.settings);
-        let site = Site::from_settings(&settings)
-            .map_err(|e| Error::Target(format!("the settings do not make a site: {e}")))?;
+        let site = self.site_of(app_id, &app.settings)?;
         let old = self.apps.get_mut(app_id).and_then(|a| a.running.take());
         if let Some(old) = old {
             self.stop(old)?;
@@ -281,6 +393,23 @@ impl Target for LocalTarget {
             app.running = Some(running);
         }
         Ok(())
+    }
+
+    fn tls_status(&self, app_id: &str) -> Result<TlsStatus, Error> {
+        let site = self
+            .apps
+            .get(app_id)
+            .filter(|a| a.ours)
+            .ok_or_else(|| Error::NotOurs {
+                app: app_id.to_string(),
+            })?
+            .running
+            .as_ref()
+            .ok_or_else(|| {
+                Error::Target("the site is not running, so it serves no certificate".into())
+            })?;
+        // The site's name is the app id, which is also the name its certificate is asked for.
+        self.runtime.block_on(crate::local::read_tls(site, app_id))
     }
 
     fn restore(&mut self, app_id: &str, snapshot: &Snapshot) -> Result<(), Error> {
@@ -551,11 +680,20 @@ mod tests {
     }
 
     #[test]
-    fn secrets_domains_and_tls_are_declared_no() {
+    fn secrets_and_domains_are_declared_no_and_reading_the_certificate_needs_trust() {
         let t = target();
-        for op in [Op::SetSecret, Op::DeleteSecret, Op::ReadTls, Op::BindDomain] {
+        for op in [Op::SetSecret, Op::DeleteSecret, Op::BindDomain] {
             assert_eq!(t.supports(op), Support::No, "{op:?}");
         }
+        // Served by `tls_status`, but like every operation it is `Unverified` until the target is told to trust it.
+        assert_eq!(t.supports(Op::ReadTls), Support::Unverified);
+        assert_eq!(
+            LocalTarget::new()
+                .unwrap()
+                .trust_operations(&[Op::ReadTls])
+                .supports(Op::ReadTls),
+            Support::Yes
+        );
         assert_eq!(t.supports(Op::Create), Support::Yes);
         assert_eq!(t.supports(Op::Restore), Support::Yes);
         assert_eq!(
@@ -768,5 +906,167 @@ mod tests {
         drop(host);
         // The listener is gone: nothing accepts there any more.
         assert!(std::net::TcpStream::connect(addr).is_err());
+    }
+
+    // ---- C8d: automatic certificates, against a fake certificate authority (no network) ----
+
+    /// A certificate authority that issues a self-signed certificate named "Fake CA" for the asked names, and refuses from its `fail_from`-th ask on.
+    struct FakeCa {
+        asks: std::sync::atomic::AtomicUsize,
+        fail_from: usize,
+    }
+
+    impl FakeCa {
+        fn new(fail_from: usize) -> Self {
+            Self {
+                asks: std::sync::atomic::AtomicUsize::new(0),
+                fail_from,
+            }
+        }
+    }
+
+    impl AcmeClient for FakeCa {
+        fn obtain<'a>(
+            &'a self,
+            names: &'a [String],
+            _challenges: &'a webservant::Challenges,
+            _kind: webservant::ChallengeKind,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<webservant::Issued, webservant::AcmeError>>
+                    + Send
+                    + 'a,
+            >,
+        > {
+            let ask = self.asks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let fail = ask >= self.fail_from;
+            Box::pin(async move {
+                if fail {
+                    return Err(webservant::AcmeError(
+                        "the fake CA could not reach port 80".to_string(),
+                    ));
+                }
+                let mut params = rcgen::CertificateParams::new(names.to_vec()).unwrap();
+                params
+                    .distinguished_name
+                    .push(rcgen::DnType::CommonName, "Fake CA");
+                let key = rcgen::KeyPair::generate().unwrap();
+                let cert = params.self_signed(&key).unwrap();
+                Ok(webservant::Issued {
+                    chain_pem: cert.pem(),
+                    key_pem: key.serialize_pem(),
+                })
+            })
+        }
+    }
+
+    /// An app named `app.test` holding settings for a site with automatic certificates from `ca`, not yet started.
+    fn acme_target(
+        ca: FakeCa,
+        files: &tempfile::TempDir,
+        store: &tempfile::TempDir,
+    ) -> LocalTarget {
+        let mut t = LocalTarget::new()
+            .unwrap()
+            .trust_operations(&[Op::Create, Op::SetSetting, Op::ReadTls])
+            .with_acme_client(ca);
+        t.apply_step("app.test", &Step::Create, None).unwrap();
+        for (name, value) in [
+            (FILES, files.path().display().to_string()),
+            (ACME_CONTACT, "ops@example.org".to_string()),
+            (ACME_STORE, store.path().display().to_string()),
+        ] {
+            t.apply_step(
+                "app.test",
+                &Step::SetSetting {
+                    name: name.to_string(),
+                    value,
+                },
+                None,
+            )
+            .unwrap();
+        }
+        t
+    }
+
+    #[test]
+    fn a_site_with_automatic_certificates_reports_the_issued_certificate_read_back_from_its_listener()
+     {
+        let (files, store) = (site_folder(), tempfile::tempdir().unwrap());
+        let mut t = acme_target(FakeCa::new(usize::MAX), &files, &store);
+        t.finish_apply("app.test").unwrap();
+        assert_eq!(t.supports(Op::ReadTls), Support::Yes);
+        let status = t.tls_status("app.test").unwrap();
+        assert_eq!(status.issuer.as_deref(), Some("CN=Fake CA"));
+        assert_eq!(status.names, vec!["app.test".to_string()]);
+        assert_eq!(status.last_renewal, crate::Renewal::Succeeded);
+        assert!(status.not_after.is_some());
+    }
+
+    #[test]
+    fn a_failed_renewal_is_reported_and_the_served_certificate_stays() {
+        let (files, store) = (site_folder(), tempfile::tempdir().unwrap());
+        // The first ask (at start) succeeds, every later one is refused.
+        let mut t = acme_target(FakeCa::new(1), &files, &store);
+        t.finish_apply("app.test").unwrap();
+        let certs = t.apps["app.test"]
+            .running
+            .as_ref()
+            .unwrap()
+            .certificates()
+            .unwrap();
+        assert!(t.runtime.block_on(certs.renew_now()).is_err());
+        let status = t.tls_status("app.test").unwrap();
+        assert!(
+            matches!(&status.last_renewal, crate::Renewal::Failed(why) if why.contains("port 80")),
+            "got {:?}",
+            status.last_renewal
+        );
+        assert_eq!(status.issuer.as_deref(), Some("CN=Fake CA"));
+    }
+
+    #[test]
+    fn the_reachability_check_answers_from_one_issuance_and_leaves_the_store_empty() {
+        let (files, store) = (site_folder(), tempfile::tempdir().unwrap());
+        let t = acme_target(FakeCa::new(usize::MAX), &files, &store);
+        let ok = t.check_reachable("app.test").unwrap();
+        assert!(ok.is_reachable());
+        assert_eq!(
+            std::fs::read_dir(store.path()).unwrap().count(),
+            0,
+            "the check must use a throwaway store, not the configured one"
+        );
+        let (files, store) = (site_folder(), tempfile::tempdir().unwrap());
+        let t = acme_target(FakeCa::new(0), &files, &store);
+        let bad = t.check_reachable("app.test").unwrap();
+        assert!(!bad.is_reachable());
+        assert!(bad.failure.unwrap().contains("port 80"));
+    }
+
+    #[test]
+    fn the_reachability_check_needs_a_contact_and_the_acme_settings_are_validated() {
+        let files = site_folder();
+        let mut t = target();
+        t.apply_step(ID, &Step::Create, None).unwrap();
+        let err = t.check_reachable(ID).unwrap_err().to_string();
+        assert!(err.contains(ACME_CONTACT), "{err}");
+        for (name, value) in [
+            (ACME_CONTACT, "not an email"),
+            (ACME_STAGING, "maybe"),
+            (ACME_DIRECTORY, "ftp://ca"),
+            (ACME_NAMES, "a.test,,b.test"),
+            (ACME_STORE, " "),
+            (HTTP_BIND, "0.0.0.0:80"),
+        ] {
+            let step = Step::SetSetting {
+                name: name.to_string(),
+                value: value.to_string(),
+            };
+            assert!(
+                t.apply_step(ID, &step, None).is_err(),
+                "{name}={value} should be refused"
+            );
+        }
+        drop(files);
     }
 }

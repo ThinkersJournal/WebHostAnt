@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.53] - 2026-11-11
+
+- Row C8d, first slice (fake CA only; no real Let's Encrypt run yet): `LocalTarget` takes automatic certificates. New settings `ACME_CONTACT` (an email; setting it turns ACME on), `ACME_STAGING` (`true`/`false`), `ACME_DIRECTORY`, `ACME_ROOT`, `ACME_STORE`, `ACME_NAMES` (comma list) and `HTTP_BIND` (loopback unless `allow_non_loopback`, like `BIND`; with ACME both default to a free loopback port). Let's Encrypt STAGING is the default authority, so production is reached only by `ACME_STAGING=false`. `ReadTls` is now served (`Unverified` until `trust_operations`): the certificate is read back over a real handshake, names and `Renewal::Failed` come from WebServAnt's manager. New `LocalTarget::check_reachable(app_id)` wraps `Site::check_reachable()` (one issuance, throwaway store) and `with_acme_client` supplies a fake CA. Four mutations each fail a test. NOT covered: that the default directory really is staging (needs the network; WebServAnt's own check forces staging for production), and any real CA. The staging run waits for the PM and a public name with ports 80/443. Not breaking. Version provisional; the PM allocates.
+
 ## [0.0.52] - 2026-11-11
 
 - Row C8c (stacked on 0.0.51): `LocalTarget` supports `Restore`. The snapshot is the settings held; restoring puts them back and restarts the site from them (stopping the one that ran), stops a site whose restored settings have nothing to serve (neither `FILES` nor `PROXY`), and for an app that did not exist stops its site and forgets it. A site that is not ours is refused and left as it was. The conformance suite's rollback checks now run against a real loopback site, and a changed folder is served again after a rollback (read back over a real request). Eight mutations each fail a test. Not breaking. Version provisional; the PM allocates.
