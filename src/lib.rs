@@ -23,6 +23,7 @@ pub mod render;
 pub mod render_target;
 #[cfg(feature = "secretant")]
 pub mod secretant_source;
+pub mod service;
 
 pub use error::Error;
 pub use host::{

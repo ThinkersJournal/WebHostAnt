@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.57] — C8e: a service definition for the on-boot path (generated, shown, installed only with its digest)
+
+Row C8e. New `service` module (no feature needed, adds no dependency): `ServiceSpec::systemd_unit` and `ServiceSpec::windows_service` build a `ServiceDefinition` (text, file name, `digest`, `show`), after checking every value (name charset, absolute paths, no control characters, a plain account name) and quoting every value for the target syntax (systemd: words double-quoted, `\`, `"`, `%` and `$` escaped; PowerShell: single-quoted, `'` doubled; a `"` in a Windows argument is refused). `install_unit_file(definition, approved_digest, dir)` writes a systemd unit only when given that definition's digest, never overwrites a file, never installs a Windows service, and does not run `systemctl`. No secret field exists. Six mutations (digest unchecked, overwrite allowed, `$` unescaped, control characters allowed, Windows installable, `'` undoubled) each fail a test. UNVERIFIED: neither text was run through a real `systemd-analyze verify` or a Windows host; SupervisorAnt does not exist, so this stays ours. Not breaking.
+
 ## [0.0.56] — Raise httpant-client to 0.7.10
 
 The PM asked for the repin after httpant 0.7.10 (core, server, client) was published. `httpant-client` 0.7.1 to 0.7.10 (it also brings `httpant-core` 0.7.10 and `ipnet` into `Cargo.lock`); the 0.5.22 copies that remain come in through the published `webservant` 0.4.4, which is unchanged. Verified by the test suite with and without `--features local`. Not breaking.
