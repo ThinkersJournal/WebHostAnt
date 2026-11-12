@@ -11,7 +11,7 @@ lane's work order; ack each once; use `key=value` headers (MESSAGE-FORMATS). Doc
 - Main has: Cloudflare adapter, Render adapter (REST, deploy once at the end of an apply), conformance suite, EnvSecrets, `local` feature
   (C8a: `ReadTls` from a real handshake), configurant 0.7.2, httpant-client 0.7.1. Cloudflare D6 real test PASSED (PM, by hand). Render real run
   PASSED at run 3 (PM); what it does NOT show is in `docs/RENDER-FACTS.md`.
-- Open PR: #56? C8e service definition (`c8e-service`, worktree `../WebHostAnt-wt-c8e`, fragment only; look the number up with `gh pr list`). #50-#55 merged
+- Open PR: #56 C8e service definition (`c8e-service`, worktree `../WebHostAnt-wt-c8e`, fragment only). #50-#55 merged
   and cleaned up (0.0.56 on main). **A PR carries one `changelog.d/<topic>.md` and edits no version line or CHANGELOG.md**; the PM stamps at merge.
   webservant stays pinned at 0.4.4 (0.4.5-0.4.8 unpublished; the PM decides that publish; no path dep).
 - When a PR merges: `git status --porcelain` in its worktree, `git worktree remove`, `git worktree prune`, `git branch -D`, confirm the remote branch
