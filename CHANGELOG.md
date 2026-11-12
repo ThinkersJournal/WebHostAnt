@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.54] - 2026-11-12
+
+- Process only (CireSnave 2026-11-12, via the PM): changelog fragments. From now on a PR carries one `changelog.d/<topic>.md` and edits no version line, `Cargo.lock` or `CHANGELOG.md`; the PM stamps the version at merge with `tools/stamp-version.py`. Adds `tools/stamp-version.py`, `tools/check-fragment.py`, the `Changelog fragment` workflow and `changelog.d/README.md`, copied from `C:\Projects	oolsragment-stamp-kit`. A dry run with a throwaway fragment listed Cargo.toml, Cargo.lock and CHANGELOG.md. No code change. Version provisional; the PM allocates.
+
 ## [0.0.53] - 2026-11-11
 
 - Row C8d, first slice (fake CA only; no real Let's Encrypt run yet): `LocalTarget` takes automatic certificates. New settings `ACME_CONTACT` (an email; setting it turns ACME on), `ACME_STAGING` (`true`/`false`), `ACME_DIRECTORY`, `ACME_ROOT`, `ACME_STORE`, `ACME_NAMES` (comma list) and `HTTP_BIND` (loopback unless `allow_non_loopback`, like `BIND`; with ACME both default to a free loopback port). Let's Encrypt STAGING is the default authority, so production is reached only by `ACME_STAGING=false`. `ReadTls` is now served (`Unverified` until `trust_operations`): the certificate is read back over a real handshake, names and `Renewal::Failed` come from WebServAnt's manager. New `LocalTarget::check_reachable(app_id)` wraps `Site::check_reachable()` (one issuance, throwaway store) and `with_acme_client` supplies a fake CA. Four mutations each fail a test. NOT covered: that the default directory really is staging (needs the network; WebServAnt's own check forces staging for production), and any real CA. The staging run waits for the PM and a public name with ports 80/443. Not breaking. Version provisional; the PM allocates.
