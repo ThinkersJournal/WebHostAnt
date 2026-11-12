@@ -10,7 +10,7 @@ readme = "README.md"
 [dependencies]
 serde_json = "1.0.154"
 sha2 = "0.11.1"
-httpant-client = { version = "0.7.1", features = ["https"] }
+httpant-client = { version = "0.7.10", features = ["https"] }
 tokio = { version = "1.54.1", features = ["rt"] }
 configurant = { version = "0.7.2", optional = true }
 webservant = { version = "0.4.4", optional = true }

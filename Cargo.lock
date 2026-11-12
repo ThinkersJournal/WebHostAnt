@@ -570,17 +570,18 @@ dependencies = [
 
 [[package]]
 name = "httpant-client"
-version = "0.7.1"
+version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80281245cb3a0d26a2e411bfd51ec4d670cb3efb0676524acdaaa7ae3ed19646"
+checksum = "20bed04080ffba4e5eb3d2312a4c926c4c05042ca24377277bd39f686fdbcfdc"
 dependencies = [
  "bytes",
  "http-body",
- "httpant-core 0.7.1",
+ "httpant-core 0.7.10",
  "hyper",
  "hyper-rustls",
  "hyper-util",
  "rustls",
+ "rustls-native-certs",
  "tokio",
  "tower",
  "webpki-roots",
@@ -602,9 +603,9 @@ dependencies = [
 
 [[package]]
 name = "httpant-core"
-version = "0.7.1"
+version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20893fd9232ed158ba410bd7f1520b7b7d65c8a8a5186ddcf40982601bb992b7"
+checksum = "aa8ff467712b0bb9cfd924576720c6e8233aa8965682d638c8e7d863142686f5"
 dependencies = [
  "bytes",
  "http",
@@ -699,6 +700,7 @@ version = "0.1.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ddc03d96684f9226b8a787cdb71488417b53ab5ea8fdb1dac946cb9431cc8bff"
 dependencies = [
+ "base64 0.23.1",
  "bytes",
  "futures-channel",
  "futures-util",
@@ -706,7 +708,9 @@ dependencies = [
  "http-body",
  "httparse",
  "hyper",
+ "ipnet",
  "libc",
+ "percent-encoding",
  "pin-project-lite",
  "socket2",
  "tokio",
@@ -751,6 +755,12 @@ dependencies = [
  "tokio",
  "x509-parser",
 ]
+
+[[package]]
+name = "ipnet"
+version = "2.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "791930b43c0d5973160d90a8f3894509f2b273430f5c5c73b668636d0287c5c0"
 
 [[package]]
 name = "is_terminal_polyfill"
@@ -1662,7 +1672,7 @@ name = "webhostant"
 version = "0.0.55"
 dependencies = [
  "configurant",
- "httpant-client 0.7.1",
+ "httpant-client 0.7.10",
  "rcgen",
  "secretant",
  "serde_json",
