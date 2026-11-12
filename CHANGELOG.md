@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.55] — C8d: `ACME_CONTACT` opts in to a non-loopback `BIND` and `HTTP_BIND`
+
+Row C8d, PM ruling option A. A `LocalTarget` app that already holds `ACME_CONTACT` may set a `BIND` or `HTTP_BIND` beyond loopback (a certificate authority must reach port 80); without it, or `allow_non_loopback`, the setting is still refused at apply. Order matters: `ACME_CONTACT` first. The default authority stays Let's Encrypt staging. Verified by the changed refusal test (refused without the contact, accepted after it, refused if the contact comes after). Not breaking. No network, no real CA.
+
 ## [0.0.54] - 2026-11-12
 
 - Process only (CireSnave 2026-11-12, via the PM): changelog fragments. From now on a PR carries one `changelog.d/<topic>.md` and edits no version line, `Cargo.lock` or `CHANGELOG.md`; the PM stamps the version at merge with `tools/stamp-version.py`. Adds `tools/stamp-version.py`, `tools/check-fragment.py`, the `Changelog fragment` workflow and `changelog.d/README.md`, copied from `C:\Projects	oolsragment-stamp-kit`. A dry run with a throwaway fragment listed Cargo.toml, Cargo.lock and CHANGELOG.md. No code change. Version provisional; the PM allocates.
