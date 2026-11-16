@@ -29,6 +29,10 @@ pub enum Fault {
     DomainNotBound,
     /// `tls_status` answers with an empty status when the host cannot be reached.
     TlsEmptyInsteadOfError,
+    /// Reports an app it did not create as its own, so a plan goes ahead over it.
+    OverwritesForeign,
+    /// Says it supports setting secrets when it does not.
+    ClaimsUnsupportedIsSupported,
 }
 
 /// An in-memory target.
@@ -121,6 +125,11 @@ impl Target for FakeTarget {
 
     fn supports(&self, op: Op) -> Support {
         match op {
+            Op::SetSecret | Op::DeleteSecret
+                if self.fault == Fault::ClaimsUnsupportedIsSupported =>
+            {
+                Support::Yes
+            }
             Op::SetSecret | Op::DeleteSecret => self.secrets_support,
             Op::Create | Op::SetSetting | Op::Restore | Op::ReadTls | Op::BindDomain => {
                 Support::Yes
@@ -139,13 +148,15 @@ impl Target for FakeTarget {
         if self.fault == Fault::ActsDuringPlan {
             self.present.set(true);
         }
-        Ok(if self.holds_other_app {
-            Presence::NotOurs
-        } else if self.present.get() {
-            Presence::Ours
-        } else {
-            Presence::Absent
-        })
+        Ok(
+            if self.holds_other_app && self.fault != Fault::OverwritesForeign {
+                Presence::NotOurs
+            } else if self.present.get() {
+                Presence::Ours
+            } else {
+                Presence::Absent
+            },
+        )
     }
 
     fn observe(&self, _app_id: &str) -> Result<Observed, Error> {
@@ -175,7 +186,7 @@ impl Target for FakeTarget {
         if self.unreachable {
             return Err(Error::Target("host unreachable".to_string()));
         }
-        if self.holds_other_app {
+        if self.holds_other_app && self.fault != Fault::OverwritesForeign {
             return Err(Error::Target("holds another app".to_string()));
         }
         if self.fault == Fault::SilentNoop {

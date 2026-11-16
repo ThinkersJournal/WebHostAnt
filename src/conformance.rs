@@ -769,6 +769,22 @@ mod tests {
     }
 
     #[test]
+    fn overwriting_an_app_that_is_not_ours_is_caught() {
+        assert!(
+            checks(Fault::OverwritesForeign)
+                .contains(&"a target that is not ours is never overwritten")
+        );
+    }
+
+    #[test]
+    fn claiming_support_it_lacks_is_caught() {
+        assert!(
+            checks(Fault::ClaimsUnsupportedIsSupported)
+                .contains(&"an unsupported operation is an error")
+        );
+    }
+
+    #[test]
     fn acting_during_plan_is_caught() {
         assert!(checks(Fault::ActsDuringPlan).contains(&"plan is inert"));
     }
@@ -846,6 +862,8 @@ mod tests {
             Fault::LeaksSecret,
             Fault::ActsDuringPlan,
             Fault::UnreachableIsAbsent,
+            Fault::OverwritesForeign,
+            Fault::ClaimsUnsupportedIsSupported,
         ] {
             for f in run(build(fault)) {
                 assert!(!f.detail.contains(CANARY), "{f:?}");
