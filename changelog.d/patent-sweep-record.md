@@ -1,3 +1,0 @@
-kind: Docs: a real patent sweep record for the 0.0 line
----
-`docs/PATENT-SWEEP.md` replaces the 0.0.0 placeholder: 10 ideas (plan/apply/read-back with a plan digest, host adapters with a conformance suite, automatic certificates and TLS read-back for local serving, secrets pushed by name, service definitions, probe, rollback, static hosting, domain attach), 13 recorded queries with a positive control, and the independent claims of 15 patents read in full or to the stated point. All 15 are clear as read, none needs review; the two closest active hits (US 8,997,088 and US 9,894,057) carry re-read triggers. Not a clearance, not legal advice. Root `PATENT-SWEEP.md` is now a pointer. No code change.
