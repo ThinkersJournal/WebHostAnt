@@ -13,6 +13,7 @@ use std::process::exit;
 
 use webhostant::local_target::LocalTarget;
 use webhostant::{Op, Step, Target};
+use webservant::acme::LETS_ENCRYPT_STAGING;
 use webservant::{AcmeClient, AcmeError, ChallengeKind, Challenges, Issued};
 
 /// An offline authority: a self-signed certificate for the asked names.
@@ -69,9 +70,11 @@ fn main() {
     }
     let settings = [
         ("FILES", files.path().display().to_string()),
+        // First: `ACME_CONTACT` is the opt-in to listening beyond loopback, so a `BIND` set before it is refused (`a_wide_bind_with_a_contact_earlier_in_the_same_settings_is_accepted` in
+        // `local_target.rs` holds this order).
+        ("ACME_CONTACT", contact.clone()),
         ("BIND", https_bind.clone()),
         ("HTTP_BIND", http_bind.clone()),
-        ("ACME_CONTACT", contact.clone()),
         ("ACME_STORE", store.path().display().to_string()),
     ];
     let result = target
@@ -95,9 +98,9 @@ fn main() {
         Ok(r) if r.is_reachable() => println!(
             "reachable: one issuance succeeded ({})",
             if fake {
-                "fake CA, offline"
+                "fake CA, offline".to_string()
             } else {
-                "Let's Encrypt staging"
+                format!("Let's Encrypt staging, directory {LETS_ENCRYPT_STAGING}")
             }
         ),
         Ok(r) => {
