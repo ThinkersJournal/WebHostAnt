@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Ask "will automatic certificates work here?" with one issuance against Let's Encrypt STAGING (never production), then stop.
 //!
 //! ```text

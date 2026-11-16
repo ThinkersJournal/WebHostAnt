@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! An in-memory target, for the README example, consumers' tests and the conformance suite's own tests.
 //!
 //! It is not a real host. The `Fault` variants are deliberate defects: the conformance suite must fail on each.
@@ -40,7 +41,7 @@ pub struct FakeTarget {
     present: Cell<bool>,
     healthy: bool,
     settings: BTreeMap<String, String>,
-    secret_values: BTreeMap<String, String>,
+    secret_values: BTreeMap<String, SecretValue>,
     domains: BTreeSet<String>,
     log: Vec<String>,
     calls: usize,
@@ -210,7 +211,8 @@ impl Target for FakeTarget {
                 } else {
                     self.log.push("set secret".to_string());
                 }
-                self.secret_values.insert(name.clone(), value);
+                self.secret_values
+                    .insert(name.clone(), SecretValue::new(value));
             }
         }
         self.steps_done += 1;

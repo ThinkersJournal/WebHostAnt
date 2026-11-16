@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Local serving with WebServAnt (feature `local`, ROADMAP row C8): this first slice reads a running site's certificate back as a [`TlsStatus`].
 //!
 //! What the answer rests on: [`read_tls`] makes a real TLS handshake with the site's own listener (`RunningSite::served_certificate`), so the

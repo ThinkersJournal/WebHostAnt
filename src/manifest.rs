@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! What a consumer declares about its app (see `docs/CONSUMER-CONTRACT.md`).
 
 use std::collections::BTreeMap;

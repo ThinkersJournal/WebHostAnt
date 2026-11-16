@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Serve an app from this machine with WebServAnt: a [`Target`] for ROADMAP row C8b.
 //!
 //! What it does: `Create` registers the app, each `SetSetting` records one setting, and [`Target::finish_apply`] starts the site (or restarts it

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! The conformance suite: run it against any [`Target`] to find out whether it keeps the contract.
 //!
 //! ```

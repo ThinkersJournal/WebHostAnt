@@ -1,0 +1,19 @@
+# Waivers for CodeRipper. Each names the check, the file and why; nothing is waived silently.
+
+[[allow]]
+check = "SEC-012"
+file = "src/conformance.rs"
+symbol = "Profile"
+reason = "false positive: `secret` is the NAME the suite gives its one secret (default `API_TOKEN`), never a value. Owner: webhostant lane. Remove when CodeRipper's type-aware SEC-012 lands."
+
+[[allow]]
+check = "SEC-012"
+file = "src/host.rs"
+symbol = "ReadBack"
+reason = "false positive: `secret_names` holds secret NAMES confirmed on the target, documented as never a value. Owner: webhostant lane. Remove when CodeRipper's type-aware SEC-012 lands."
+
+[[allow]]
+check = "SEC-012"
+file = "src/target.rs"
+symbol = "Observed"
+reason = "false positive: `secret_names` holds the NAMES of secrets that exist, documented as never values. Owner: webhostant lane. Remove when CodeRipper's type-aware SEC-012 lands."

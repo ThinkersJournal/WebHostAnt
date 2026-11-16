@@ -1,0 +1,3 @@
+kind: Hygiene: FakeTarget holds secrets as SecretValue, SPDX headers, CodeRipper waivers
+---
+`FakeTarget` kept the secret values it was given as plain `String` under a derived `Debug`; they are now `SecretValue`, which prints `<redacted>` (CodeRipper SEC-012, a true positive). All 23 `.rs` files carry `// SPDX-License-Identifier: MIT OR Apache-2.0` (SUP-016). A new `.coderipper.toml` waives, with reasons, owner and removal condition, the three SEC-012 reports on fields that hold secret NAMES (`Profile`, `ReadBack`, `Observed`) until CodeRipper's type-aware SEC-012 lands. Verified: fmt, clippy and the full test suite pass (one re-run of the known flaky `a_call_that_outlives_its_limit_is_stopped_and_reported`). The Portfolio job is to be read on the PR.

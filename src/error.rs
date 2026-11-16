@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Errors. Each says what the person should do next, and none carries a secret value.
 
 use std::fmt;

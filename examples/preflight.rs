@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Check this machine before a Cloudflare container deploy: `cargo run --example preflight`. Reads only; prints no email, account or token.
 
 use std::time::Duration;

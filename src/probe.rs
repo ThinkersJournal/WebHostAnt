@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! A real health probe: one `GET` of the deployed app's health path, through HTTPAnt's client.
 //!
 //! Redirects are never followed (an app that answers its health path with a redirect to a login page is not healthy; the `3xx` is reported), and
