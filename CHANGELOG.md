@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.59] — CI: CodeRipper 0.47.5 (portfolio workflow pin moved)
+
+Moves the shared portfolio workflow pin to coderipper c72a6e0, which installs CodeRipper 0.47.5. This repo has no `.coderipper.toml` and no rule names in other files, so `migrate-rule-ids.py` has nothing to rewrite (it exits 2: no config to read). No code change.
+
 ## [0.0.58] — C8d: an example for the staging reachability run
 
 Adds `examples/local_staging.rs`: builds a `LocalTarget` site with `ACME_CONTACT` (authority left at its Let's Encrypt STAGING default), calls `check_reachable` once and prints the answer. `--fake-ca` runs it offline against a local stand-in. Verified offline: exit 0 with the fake CA; with the stand-in made to refuse, exit 1 and its reason printed (mutation applied and reverted); clippy clean. Not yet run against real staging.
