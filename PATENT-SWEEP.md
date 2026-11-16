@@ -1,5 +1,3 @@
 # Patent sweep
 
-No code exists beyond an empty placeholder crate, so there is nothing to compare against any claim. A
-sweep (automated deployment, certificate issuance and renewal) is a precondition of the first release
-that contains functionality. Not legal advice; no attorney exists.
+The record lives in `docs/PATENT-SWEEP.md` (0.0.58, 2026-11-16). Not legal advice; no attorney has reviewed it.
