@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! The interface a host adapter implements.
 
 use std::collections::{BTreeMap, BTreeSet};

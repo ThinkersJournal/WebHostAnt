@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Real-target tests for the Cloudflare adapter: what `examples/deploy.rs` did by hand on 2026-11-08, as a test that runs on a self-hosted runner
 //! against the D6 test account (CIRESNAVE rule: tests that cannot run on GitHub run on a self-hosted runner, never `#[ignore]`).
 //!

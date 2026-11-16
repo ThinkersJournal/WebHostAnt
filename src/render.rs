@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Render's REST API: services, variables, secret files, custom domains and deploys.
 //!
 //! **Shapes come from Render's published OpenAPI file** (`https://api-docs.render.com/openapi/render-public-api-1.json`, read 2026-10-31; see

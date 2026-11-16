@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Serve an app from this machine with WebServAnt: a [`Target`] for ROADMAP row C8b.
 //!
 //! What it does: `Create` registers the app, each `SetSetting` records one setting, and [`Target::finish_apply`] starts the site (or restarts it
@@ -682,6 +683,28 @@ mod tests {
             value: "not-an-address".into(),
         };
         assert!(open.apply_step(ID, &bad, None).is_err());
+    }
+
+    /// The order `examples/local_staging.rs` applies its settings in: the contact comes before the wide binds, in one list, with no
+    /// `allow_non_loopback`. The same list with the contact last is refused at `BIND`.
+    #[test]
+    fn a_wide_bind_with_a_contact_earlier_in_the_same_settings_is_accepted() {
+        let set = |name: &str, value: &str| Step::SetSetting {
+            name: name.into(),
+            value: value.into(),
+        };
+        let apply = |order: &[(&str, &str)]| {
+            let mut t = target();
+            t.apply_step(ID, &Step::Create, None).unwrap();
+            order
+                .iter()
+                .try_for_each(|(k, v)| t.apply_step(ID, &set(k, v), None).map(|_| ()))
+        };
+        let contact = ("ACME_CONTACT", "ops@example.org");
+        let (bind, http) = (("BIND", "0.0.0.0:443"), ("HTTP_BIND", "0.0.0.0:80"));
+        apply(&[contact, bind, http]).expect("contact first, then the wide binds");
+        let err = apply(&[bind, http, contact]).unwrap_err();
+        assert!(format!("{err}").contains("loopback"), "{err}");
     }
 
     #[test]

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! The Render adapter: a [`Target`] that drives Render's REST API through [`RenderApi`].
 //!
 //! **Unverified against a real account.** Shapes are from Render's published OpenAPI file (`docs/SECOND-HOST.md`); no Render account exists for us yet.

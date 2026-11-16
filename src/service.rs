@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! The on-boot path of local mode (ROADMAP row C8e): a service definition for the operating system, generated and shown, and never installed without
 //! the digest of exactly that text.
 //!

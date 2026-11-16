@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! One throwaway Render web service, end to end, for the by-hand real-account check (`docs/RELEASE-CHECKLIST.md`).
 //!
 //! ```text

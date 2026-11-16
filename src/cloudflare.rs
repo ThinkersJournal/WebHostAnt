@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! The Cloudflare adapter: a [`Target`] that drives a pinned `wrangler`.
 //!
 //! **Checked once against a real account (2026-11-08, `wrangler` 4.141.0, a throwaway Worker; `docs/CLOUDFLARE-FACTS.md`):** `Create`, `SetSetting`,

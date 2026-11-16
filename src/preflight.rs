@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! A read-only check, before a Cloudflare deploy, of what the deploy needs on this machine: `wrangler` present and recent enough, a login, the
 //! token's scopes, and (for a container) Docker with a running daemon.
 //!

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Plan, apply, read back: the one path every target goes through.
 
 use std::fmt;

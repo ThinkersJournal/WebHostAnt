@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Plan, approve, apply and read back one Cloudflare Worker, from the command line.
 //!
 //! Two runs, on purpose. The first prints the plan and its digest and changes NOTHING:

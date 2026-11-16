@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Cloudflare Workers custom domains over the REST API: list, attach, detach.
 //!
 //! **Shapes come from Cloudflare's published OpenAPI schema** (`docs/CLOUDFLARE-FACTS.md`), not from a recorded live answer: no test account exists

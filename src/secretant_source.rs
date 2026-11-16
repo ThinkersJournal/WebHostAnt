@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Secrets from SecretAnt: a [`Secrets`] source over a getter that returns SecretAnt's `SecretValue` (ROADMAP row C7a).
 //!
 //! SecretAnt 0.0.2 ships only the value type (bytes, wiped on drop, no `Display`, no `Clone`); the store comes later (C7b). So this takes a

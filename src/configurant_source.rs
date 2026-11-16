@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Settings from ConfigurAnt: render the values an app declared into WebHostAnt's [`Config`], and name where its secrets come from.
 //!
 //! This is the "projection" of `docs/DESIGN.md` section 6.3 item 1. It needs no new ConfigurAnt feature: it reads a resolved
