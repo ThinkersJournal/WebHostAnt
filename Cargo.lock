@@ -541,31 +541,13 @@ dependencies = [
 
 [[package]]
 name = "httpant"
-version = "0.5.22"
+version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f592238604a2c542c1f4b2a0891526ddeef9923c62484c1de397250c06dd57a"
+checksum = "fbac29ae4d8ea680af8f6b87d8df8ece490d04c904d7a489a963468e53c72b6e"
 dependencies = [
- "httpant-client 0.5.22",
- "httpant-core 0.5.22",
+ "httpant-client",
+ "httpant-core",
  "httpant-server",
-]
-
-[[package]]
-name = "httpant-client"
-version = "0.5.22"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1192966ca6f133632ec7380701f5c6547a182d8d07570c76d940194bbe2bf043"
-dependencies = [
- "bytes",
- "http-body",
- "httpant-core 0.5.22",
- "hyper",
- "hyper-rustls",
- "hyper-util",
- "rustls",
- "tokio",
- "tower",
- "webpki-roots",
 ]
 
 [[package]]
@@ -576,7 +558,7 @@ checksum = "20bed04080ffba4e5eb3d2312a4c926c4c05042ca24377277bd39f686fdbcfdc"
 dependencies = [
  "bytes",
  "http-body",
- "httpant-core 0.7.10",
+ "httpant-core",
  "hyper",
  "hyper-rustls",
  "hyper-util",
@@ -585,20 +567,6 @@ dependencies = [
  "tokio",
  "tower",
  "webpki-roots",
-]
-
-[[package]]
-name = "httpant-core"
-version = "0.5.22"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69b6733dc89e6ae836bb93b47f5761460a9bd0fc0439ec36691f7b3cc7f5172a"
-dependencies = [
- "bytes",
- "http",
- "http-body",
- "http-body-util",
- "thiserror",
- "tower",
 ]
 
 [[package]]
@@ -619,15 +587,16 @@ dependencies = [
 
 [[package]]
 name = "httpant-server"
-version = "0.5.22"
+version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b986c0eb070d640a57fbb82abecc61576ad1299ba424c31ae005a1043e9e6c9"
+checksum = "8936471381bb45522f5feecdab15a4952b3dcd450e99464b18b02107798ec908"
 dependencies = [
  "http-body",
- "httpant-core 0.5.22",
+ "httpant-core",
  "hyper",
  "hyper-util",
  "rustls",
+ "serde",
  "tokio",
  "tokio-rustls",
  "tower",
@@ -1669,10 +1638,10 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "webhostant"
-version = "0.0.62"
+version = "0.0.63"
 dependencies = [
  "configurant",
- "httpant-client 0.7.10",
+ "httpant-client",
  "rcgen",
  "secretant",
  "serde_json",
@@ -1703,9 +1672,9 @@ dependencies = [
 
 [[package]]
 name = "webservant"
-version = "0.4.4"
+version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed87569aeb9ad8f63df9700a5a4c60c41e6e972dc3e301131bcda5e70185f6a2"
+checksum = "1e9a669736a4fd2a49540c4affebb17167f0c65dc17f8aeafdb31fa359e0ade5"
 dependencies = [
  "bytes",
  "futures-util",
