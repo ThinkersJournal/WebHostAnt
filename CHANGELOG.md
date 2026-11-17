@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.63] — Raise webservant to 0.4.12
+
+The `local` feature depends on `webservant` 0.4.12 (published on crates.io; was 0.4.4), taking `httpant-server` 0.5.22 to 0.7.10 in the lockfile. Verified: `cargo clippy --all-targets --all-features -- -D warnings` clean and `cargo test --all-features` pass (186 + 5 + 2), unchanged from 0.4.4.
+
 ## [0.0.62] — Hygiene: FakeTarget holds secrets as SecretValue, SPDX headers, CodeRipper waivers
 
 `FakeTarget` kept the secret values it was given as plain `String` under a derived `Debug`; they are now `SecretValue`, which prints `<redacted>` (CodeRipper SEC-012, a true positive). All 23 `.rs` files carry `// SPDX-License-Identifier: MIT OR Apache-2.0` (SUP-016). A new `.coderipper.toml` waives, with reasons, owner and removal condition, the three SEC-012 reports on fields that hold secret NAMES (`Profile`, `ReadBack`, `Observed`) until CodeRipper's type-aware SEC-012 lands. Verified: fmt, clippy and the full test suite pass (one re-run of the known flaky `a_call_that_outlives_its_limit_is_stopped_and_reported`). The Portfolio job is to be read on the PR. `fake::Fault` gains `OverwritesForeign` and `ClaimsUnsupportedIsSupported`, with tests that the conformance suite catches each: the README's claims that it fails on an overwritten foreign app and on an unsupported operation that does not error had checks but no test that they catch a bad target. The `local_staging` example set `BIND` before `ACME_CONTACT`, so LocalTarget refused a non-loopback `BIND` and the documented command exited 2 (found by the PM's real staging run on 2026-11-16, which reached Let's Encrypt staging after a local patch); the contact now comes first, a test holds that order, and the example prints the staging directory URL. ROADMAP C8d records the run and what is still unshown.
