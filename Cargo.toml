@@ -15,7 +15,7 @@ tokio = { version = "1.54.1", features = ["rt"] }
 configurant = { version = "0.7.2", optional = true }
 webservant = { version = "0.4.12", optional = true }
 x509-parser = { version = "0.18", optional = true }
-secretant = { version = "0.0.2", optional = true }
+secretant = { version = "0.1.5", optional = true }
 
 [features]
 # Read an app's settings from a resolved ConfigurAnt configuration (docs/DESIGN.md section 6.3).
