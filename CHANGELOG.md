@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.64] — Added: `SecretAntStore`, a `Secrets` source over SecretAnt's store (ROADMAP C7b)
+
+`secretant_source::SecretAntStore::open(ReadConfig)` reads SecretAnt's encrypted store through `SecretReader` (SecretAnt 0.1.5, raised from 0.0.2): `try_get(name)` tells a missing secret (`Ok(None)`) from an unreadable store (`Err`, SecretAnt's `ReadError` class), `names()` lists names only, and `Secrets::get` gives no value for both. Empty and non-UTF-8 values give no value, as `SecretAntSecrets` does. No audit: SecretAnt 0.1.5 has none. Verified: 7 new tests on a real store in a temporary folder (read by name, sorted names, wrong passphrase gives Denied, missing store gives Unreachable, store removed after open gives an error not a missing secret, a rotated value is seen at once, Debug shows nothing, a plan applies from it), and a mutation (swallowing every error) is caught; `cargo clippy --all-targets --all-features -- -D warnings` and `cargo test --all-features` pass. Not shown: the OS-bound unlock, or a store holding real secrets.
+
 ## [0.0.63] — Raise webservant to 0.4.12
 
 The `local` feature depends on `webservant` 0.4.12 (published on crates.io; was 0.4.4), taking `httpant-server` 0.5.22 to 0.7.10 in the lockfile. Verified: `cargo clippy --all-targets --all-features -- -D warnings` clean and `cargo test --all-features` pass (186 + 5 + 2), unchanged from 0.4.4.
