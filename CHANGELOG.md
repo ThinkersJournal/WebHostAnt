@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.65] — Docs: ROADMAP C8a and C8d state what is true now
+
+C8d no longer says the staging run is still to do (the PM ran it on 2026-11-16, recorded in the row), and C8a no longer says two httpant lines compile side by side: with webservant 0.4.12 `cargo tree -d --features local` lists no duplicate httpant crate (every httpant crate is 0.7.10). No code change.
+
 ## [0.0.64] — Added: `SecretAntStore`, a `Secrets` source over SecretAnt's store (ROADMAP C7b)
 
 `secretant_source::SecretAntStore::open(ReadConfig)` reads SecretAnt's encrypted store through `SecretReader` (SecretAnt 0.1.5, raised from 0.0.2): `try_get(name)` tells a missing secret (`Ok(None)`) from an unreadable store (`Err`, SecretAnt's `ReadError` class), `names()` lists names only, and `Secrets::get` gives no value for both. Empty and non-UTF-8 values give no value, as `SecretAntSecrets` does. No audit: SecretAnt 0.1.5 has none. Verified: 7 new tests on a real store in a temporary folder (read by name, sorted names, wrong passphrase gives Denied, missing store gives Unreachable, store removed after open gives an error not a missing secret, a rotated value is seen at once, Debug shows nothing, a plan applies from it), and a mutation (swallowing every error) is caught; `cargo clippy --all-targets --all-features -- -D warnings` and `cargo test --all-features` pass. Not shown: the OS-bound unlock, or a store holding real secrets.
