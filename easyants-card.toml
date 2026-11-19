@@ -1,0 +1,5 @@
+name = "WebHostAnt"
+sentence = "Deploy a web app to a host and prove it is there: plan, apply, read back, with a conformance suite for host adapters. Early: Cloudflare is the first adapter."
+status = "not-ready"
+status_label = "Name reserved, not released"
+docs = "https://github.com/ThinkersJournal/WebHostAnt"
