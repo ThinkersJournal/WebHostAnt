@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.66] — docs: ROADMAP C5 and C6 stated true, and an EasyAnts card
+
+Documentation only. The ROADMAP rows for C5 (the runnable example) and C6 (`Restore` for Cloudflare) still said both needed a by-hand run; both are built (`examples/deploy.rs`, `CloudflareTarget::restore`) and the plain-Worker shapes were closed by real runs on 2026-11-08 and 2026-11-09. The rows now say so, record the PM's 2026-11-19 decision of no further real run, and name the one thing still unproven: whether a Worker rollback reverts what a Container binding runs. Checked by reading `src/cloudflare.rs` and `docs/CLOUDFLARE-FACTS.md` at origin/main.
+
+Adds `easyants-card.toml` at the repo root (format: ThinkersJournal/easyants `docs/CARD-FORMAT.md` at 12844fd). It is a `not-ready` card ("Name reserved, not released"): crates.io holds `webhostant` 0.0.0 only (read 2026-11-19), so no install link or example is given. No code changed.
+Replaces `LICENSE-APACHE` with the canonical Apache-2.0 text (the old copy had missing words in sections 2 and 3 and "authorship covered by this License" for "authorship"); the new file is byte-identical to the canonical copy in ciresnave/PersistAnt (11358 bytes, sha256 `cfc7749b...`).
+
 ## [0.0.65] — Docs: ROADMAP C8a and C8d state what is true now
 
 C8d no longer says the staging run is still to do (the PM ran it on 2026-11-16, recorded in the row), and C8a no longer says two httpant lines compile side by side: with webservant 0.4.12 `cargo tree -d --features local` lists no duplicate httpant crate (every httpant crate is 0.7.10). No code change.
