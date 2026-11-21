@@ -216,7 +216,7 @@ needs no SecretAnt access. Cost: the secret now exists in two places, and the ho
 
 | Target | Where the secret goes | Notes |
 |---|---|---|
-| Cloudflare | The Worker's secret store, by API or `wrangler` (**UNVERIFIED**) | Humboldt already lists its secrets in code (`install::SECRETS`, checked against the Worker's `Env` by a test, read). Reuse that list as the contract |
+| Cloudflare | The Worker's secret store, by `wrangler secret put` / `secret delete`: run for real on 2026-11-08 and 2026-11-09 (`docs/CLOUDFLARE-FACTS.md`); the REST path is not used | Humboldt already lists its secrets in code (`install::SECRETS`, checked against the Worker's `Env` by a test, read). Reuse that list as the contract |
 | Docker server | A directory of files mounted at a secrets path, mode 0600, which ConfigurAnt's `file` source reads (read: bare file names, 64 KiB cap, group/other-readable files refused on Unix) | Avoid putting secrets in `environment:` of the compose file, which is readable by `docker inspect` (**UNVERIFIED**) |
 | Bare VM, Linux | The same directory, owned by the service user; or the service manager's credential feature (**UNVERIFIED**) | |
 | Bare VM, Windows | A protected file with a restricted ACL, or the OS credential store (**UNVERIFIED**) | ConfigurAnt's `file` source checks Unix permission bits only (read); Windows needs its own check |
@@ -329,7 +329,7 @@ Nothing in this project needs to wait for them to **start**, if each dependency 
 
 | Dependency | Stub for now | Real thing replaces it when |
 |---|---|---|
-| CapAnt | A hard-coded table of `Yes/No/Unverified` in our own test types | CapAnt is on crates.io (its R2 is the engine; design only today, version 0.0.7) |
+| CapAnt | A hard-coded table of `Yes/No/Unverified` in our own test types | CapAnt is on crates.io (crates.io lists `capant` 0.1.0 as of 2026-11-21, `cargo search`; this row was written at 0.0.7, when it was design only; whether we adopt it is undecided) |
 | ConfigurAnt | A plain TOML struct in this crate | Slice 1 below uses ConfigurAnt directly; it is published (0.2.25 on crates.io per its roadmap row 17, held for the PM's batch; **UNVERIFIED** current state) |
 | SecretAnt | Environment variables and the `file` source | SecretAnt design and adapter crate exist (its adapter row is held on SecretAnt being on crates.io, read) |
 | AuditAnt, RedactAnt | A trait that receives events and a wrapper type whose `Debug` shows nothing | Both published |
