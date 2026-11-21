@@ -2,7 +2,7 @@
 # no account and no token, so hosted CI (ci.yml) only compiles the test; without WEBHOSTANT_REAL_TARGET=1 it prints one line and
 # returns. Policy: CIRESNAVE-EXPECTATIONS 5.1g/5.1h (the test is never #[ignore]d; it runs here, behind trusted triggers only).
 #
-# Triggers: nightly schedule, manual dispatch and push to main. NEVER pull_request or pull_request_target: a PR would run
+# Triggers: manual dispatch only for now (nightly schedule and push to main follow once a runner exists, see `on:`). NEVER pull_request or pull_request_target: a PR would run
 # unreviewed code on the maintainer's machine next to a token. The job runs only for refs/heads/main, so a dispatch that
 # selects another ref is skipped. Read-only token permissions; no third-party actions beyond checkout.
 #
@@ -13,12 +13,16 @@
 # the labels below is registered, the job waits for one and runs nothing.
 name: real-cloudflare
 
+# Dispatch only until a runner is registered (PM ruling 2026-11-19: a push or cron job with no runner queues until timeout and
+# leaves noise on a public repo). pm-ants says when a runner exists; then widen to:
+#   on:
+#     schedule:
+#       - cron: '23 4 * * *'
+#     workflow_dispatch:
+#     push:
+#       branches: [main]
 on:
-  schedule:
-    - cron: '23 4 * * *'
   workflow_dispatch:
-  push:
-    branches: [main]
 
 permissions:
   contents: read
