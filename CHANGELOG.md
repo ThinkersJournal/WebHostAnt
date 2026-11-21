@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.67] — C9: nightly self-hosted workflow for the real Cloudflare test
+
+Adds `.github/workflows/real-cloudflare.yml`: runs `cargo test --test real_cloudflare` with `WEBHOSTANT_REAL_TARGET=1` on `[self-hosted, Windows, X64]` on a nightly schedule, manual dispatch and push to main (never a pull request), read-only permissions, environment `real-cloudflare`, main ref only. The token is `secrets.CLOUDFLARE_API_TOKEN` and the account id `vars.CLOUDFLARE_ACCOUNT_ID`, referenced by name only; the test is not `#[ignore]`d. Until a runner is registered the job waits and runs nothing. Verified by YAML parse and a grep that no `pull_request` trigger is present; the workflow has not run.
+
 ## [0.0.66] — docs: ROADMAP C5 and C6 stated true, and an EasyAnts card
 
 Documentation only. The ROADMAP rows for C5 (the runnable example) and C6 (`Restore` for Cloudflare) still said both needed a by-hand run; both are built (`examples/deploy.rs`, `CloudflareTarget::restore`) and the plain-Worker shapes were closed by real runs on 2026-11-08 and 2026-11-09. The rows now say so, record the PM's 2026-11-19 decision of no further real run, and name the one thing still unproven: whether a Worker rollback reverts what a Container binding runs. Checked by reading `src/cloudflare.rs` and `docs/CLOUDFLARE-FACTS.md` at origin/main.

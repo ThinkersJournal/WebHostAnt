@@ -1,0 +1,67 @@
+# Runs tests/real_cloudflare.rs against the D6 Cloudflare test account on a self-hosted Windows runner. Hosted runners have
+# no account and no token, so hosted CI (ci.yml) only compiles the test; without WEBHOSTANT_REAL_TARGET=1 it prints one line and
+# returns. Policy: CIRESNAVE-EXPECTATIONS 5.1g/5.1h (the test is never #[ignore]d; it runs here, behind trusted triggers only).
+#
+# Triggers: manual dispatch only for now (nightly schedule and push to main follow once a runner exists, see `on:`). NEVER pull_request or pull_request_target: a PR would run
+# unreviewed code on the maintainer's machine next to a token. The job runs only for refs/heads/main, so a dispatch that
+# selects another ref is skipped. Read-only token permissions; no third-party actions beyond checkout.
+#
+# Names this workflow needs (set by the PM from the vault once a runner exists; never written in this repo):
+#   secret   CLOUDFLARE_API_TOKEN   (environment `real-cloudflare`)
+#   variable CLOUDFLARE_ACCOUNT_ID  (environment `real-cloudflare`)
+# The runner needs Node and wrangler 4.141.0 on PATH (the test drives the real one) and a Rust toolchain. Until a runner with
+# the labels below is registered, the job waits for one and runs nothing.
+name: real-cloudflare
+
+# Dispatch only until a runner is registered (PM ruling 2026-11-19: a push or cron job with no runner queues until timeout and
+# leaves noise on a public repo). pm-ants says when a runner exists; then widen to:
+#   on:
+#     schedule:
+#       - cron: '23 4 * * *'
+#     workflow_dispatch:
+#     push:
+#       branches: [main]
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  real-cloudflare:
+    name: real_cloudflare test (self-hosted, D6 test account)
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Windows, X64]
+    environment: real-cloudflare
+    timeout-minutes: 30
+    concurrency:
+      group: real-cloudflare
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Tools are on PATH (fails loudly; nothing is installed)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($t in 'cargo', 'rustc', 'node', 'wrangler') {
+            if (-not (Get-Command $t -ErrorAction SilentlyContinue)) { throw "$t is not on PATH for this account" }
+          }
+          $w = (wrangler --version | Out-String).Trim()
+          if ($w -notmatch '4\.141\.0') { throw 'wrangler is not 4.141.0' }
+          'tools present'
+
+      - name: cargo test --test real_cloudflare
+        shell: powershell
+        env:
+          WEBHOSTANT_REAL_TARGET: '1'
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          cargo test --locked --test real_cloudflare --no-fail-fast
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
