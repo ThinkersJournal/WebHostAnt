@@ -1,0 +1,3 @@
+kind: C9: nightly self-hosted workflow for the real Cloudflare test
+---
+Adds `.github/workflows/real-cloudflare.yml`: runs `cargo test --test real_cloudflare` with `WEBHOSTANT_REAL_TARGET=1` on `[self-hosted, Windows, X64]` on a nightly schedule, manual dispatch and push to main (never a pull request), read-only permissions, environment `real-cloudflare`, main ref only. The token is `secrets.CLOUDFLARE_API_TOKEN` and the account id `vars.CLOUDFLARE_ACCOUNT_ID`, referenced by name only; the test is not `#[ignore]`d. Until a runner is registered the job waits and runs nothing. Verified by YAML parse and a grep that no `pull_request` trigger is present; the workflow has not run.
