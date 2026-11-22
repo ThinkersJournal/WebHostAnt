@@ -1,6 +1,6 @@
 # Edge, TLS and web-server agnosticism
 
-**Design only. Nothing here is built.** Written 2026-10-28 by the WebHostAnt lane against WebHostAnt `origin/main` `de284d2`.
+**Status 2026-11-22: partly built, per ROADMAP C8a-C8e: the `local` feature (`LocalTarget`, over `webservant`), automatic TLS settings with one real Let's Encrypt STAGING run by the PM on 2026-11-16, and a generated service definition (nothing run on a real systemd or Windows host). The text below is the original design and was not re-checked.** Originally: **design only.** Written 2026-10-28 by the WebHostAnt lane against WebHostAnt `origin/main` `de284d2`.
 "Read" means read this session at the named ref; **UNVERIFIED** means recalled, not looked up (every claim about Caddy, nginx, Cloudflare,
 ACME crates). Question from CireSnave, 2026-10-28 (board 320, first-hand): *"Caddy is a web server. Does it support our goals of web server
 library agnosticism? If not, Caddy is the wrong choice there. ... Do we need a WebServAnt project that is a web server library agnostic web server?"*
