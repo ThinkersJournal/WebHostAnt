@@ -1,6 +1,6 @@
-# By-hand release checklist (D6, until a Cloudflare test account exists)
+# By-hand release checklist (D6: the fallback until the runner workflow has run)
 
-CIRESNAVE-DECISIONS D6: real-target tests need a dedicated Cloudflare test account whose token sits in the secrets store. Until it exists, **before each
+CIRESNAVE-DECISIONS D6: real-target tests need a dedicated Cloudflare test account whose token sits in the secrets store. The account exists (the PM ran 5 real tests on it on 2026-11-09, `docs/REAL-TARGET-TESTS.md`), and `.github/workflows/real-cloudflare.yml` (0.0.67) is written, but it has NEVER RUN: no runner is registered. Until it has run once (then say so here), **before each
 published release that touches `src/cloudflare.rs`**, someone with their own Cloudflare account runs this by hand and records the result in the release PR.
 Nothing here is automated, and nothing here may use a production account or a token with more than the rights listed.
 

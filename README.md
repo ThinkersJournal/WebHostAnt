@@ -1,6 +1,6 @@
 # WebHostAnt
 
-Put a web app on a host, and prove it is there. **Early: the contract and a conformance suite exist; the Cloudflare adapter exists but is unverified against a real account** (`cloudflare::CloudflareTarget`; every operation is `Unverified` until opted in).
+Put a web app on a host, and prove it is there. **Early: the contract and a conformance suite exist; the Cloudflare adapter exists and a plain Worker deploy and rollback were run for real on a throwaway Worker (2026-11-08 and 2026-11-09, `examples/deploy.rs`), but a container deploy is unproven and nothing runs against a real account in CI yet** (`cloudflare::CloudflareTarget`; every operation is `Unverified` until opted in).
 Not ready for developer use until it passes the fresh-eyes trial. See `ROADMAP.md` and `docs/`.
 
 ```rust
