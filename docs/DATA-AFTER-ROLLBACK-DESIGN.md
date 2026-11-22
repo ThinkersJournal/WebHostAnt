@@ -1,6 +1,6 @@
 # Saying, before an apply, whether data can follow a rollback
 
-**Proposal, nothing built.** Written 2026-10-29 by the WebHostAnt lane against `origin/main` `544cd4a`. Inputs: `CONSUMER-CONTRACT.md` section 1 rows 5 and 6 and
+**Status 2026-11-22: built** (`DataAfterRollback`, `Host::plan_release`, `Migrations`, `Release` in `src/host.rs` and `src/manifest.rs`; the code PR was 0.0.19). The text below is the original 2026-10-29 proposal. Written 2026-10-29 by the WebHostAnt lane against `origin/main` `544cd4a`. Inputs: `CONSUMER-CONTRACT.md` section 1 rows 5 and 6 and
 section 2 (Rollback line), `ROLLBACK-DESIGN.md` point 5. The contract promises that rollback "states **before apply** whether data can follow (the schema
 accepts the old code, or only a backup restore will do)". Today the plan says only whether the *target* can undo (`Plan::undoable`); it says nothing about data.
 
