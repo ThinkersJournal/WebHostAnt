@@ -1,8 +1,8 @@
 # Setting up domains
 
-**Proposal, nothing built.** Written 2026-10-29 by the WebHostAnt lane against `origin/main` `1b20bcb` (0.0.12). Inputs: `CONSUMER-CONTRACT.md` section 2
+**Status 2026-11-22: the REST path is built (`src/cloudflare_domains.rs`, `Domains`, `HttpRest`) and tested against fakes; no domain was ever bound on a real account (the 2026-11-09 real run did not exercise domains). The text below is the original 2026-10-29 proposal.** Written 2026-10-29 by the WebHostAnt lane against `origin/main` `1b20bcb` (0.0.12). Inputs: `CONSUMER-CONTRACT.md` section 2
 (domain/TLS line), `src/target.rs` (`TlsStatus`, `Op::ReadTls`), `src/host.rs` (`plan`, `apply`, `verify`). How Cloudflare binds a custom domain, and what its
-output looks like, is **UNVERIFIED** until a real account exists (D6).
+output looks like, is **UNVERIFIED** until a real domain run (the D6 account exists since 2026-11-09, but no run bound a domain).
 
 ## Hello-world first
 
