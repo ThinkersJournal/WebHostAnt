@@ -1,6 +1,6 @@
 # What WebHostAnt needs from a server's TLS surface (need list for HTTPAnt)
 
-Written 2026-10-30 by the WebHostAnt lane, against `origin/main` `da42863`. For the HTTPAnt lane. **Needs, not a design:** nothing here is built, and
+Written 2026-10-30 by the WebHostAnt lane, against `origin/main` `da42863`. For the HTTPAnt lane. **Status 2026-11-22: partly built, per ROADMAP C8a-C8e: the `local` feature (`LocalTarget`, over `webservant`), automatic TLS settings with one real Let's Encrypt STAGING run by the PM on 2026-11-16, and a generated service definition (nothing run on a real systemd or Windows host). The list below is the original need list and was not re-checked.** Originally: **needs, not a design:** nothing was built, and
 the claims about ACME and rustls behaviour are recalled, not looked up (UNVERIFIED). Rulings behind it: local serving and automatic TLS wait for
 WebServAnt, which waits for HTTPAnt (CireSnave 2026-10-28, `docs/EDGE-AND-AGNOSTICISM.md`); **HTTPAnt must not become a TLS stack.**
 

@@ -1,6 +1,6 @@
 # Consumer contract
 
-**Design only. Nothing here is built.** Written 2026-10-28 by the WebHostAnt lane against WebHostAnt `origin/main` `de284d2`. Derived from Humboldt's
+**Status 2026-11-22: the contract is built** (`Host`, `Target`, `AppManifest`, the conformance suite, Cloudflare, Render and local adapters; see README, ROADMAP and `docs/DESIGN.md`). The compiled example is the README's; the sketch below is the original 2026-10-28 design and its calls are NOT the real API (no `Host::from_config`: the real calls are `Host::new(target)`, `plan(&app, &config)`, `apply(&plan, &secrets)`). Originally: **design only.** Written 2026-10-28 by the WebHostAnt lane against WebHostAnt `origin/main` `de284d2`. Derived from Humboldt's
 installer design (`docs/INSTALLER-DESIGN.md` on branch `docs/installer-design` @ `1472ce0`, read in full; not yet on Humboldt `main`) and from the
 Humboldt lane's own must-have list (peer message, 2026-10-28, status draft). Humboldt is the **first** consumer, not the owner: every name below is
 generic, and section 5 lists what stays Humboldt's. **UNVERIFIED** marks anything not read.
@@ -8,7 +8,7 @@ generic, and section 5 lists what stays Humboldt's. **UNVERIFIED** marks anythin
 ## Hello-world first
 
 ```rust
-// Intended, not built.
+// Original sketch, NOT the real API (see the README for the compiled example).
 let app = AppManifest::new("my-app").health("/health").setting("APP_BASE_URL").secret("DATABASE_URL");
 let host = webhostant::Host::from_config(&settings)?;   // target chosen by settings, not by code
 host.plan(&app)?.apply()?.read_back()?;                 // plan is inert; read-back is the proof

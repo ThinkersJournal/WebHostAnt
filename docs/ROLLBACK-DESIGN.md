@@ -1,8 +1,8 @@
 # Rollback and partial apply
 
 **Built in 0.0.11** (PM rulings 2026-10-29, below). Names differ slightly from the proposal: `StepOutcome`, `Error::ApplyFailed { steps, cause, rollback_point }`, `Host::can_roll_back`, `Plan::undoable`. Originally written 2026-10-29 by the WebHostAnt lane against `origin/main` `0b1e96f`. Inputs: `CONSUMER-CONTRACT.md` section 2
-(rollback line) and the consumer lane's guarantees list (peer message, 2026-10-29). Exact wording of what a host call returns is **UNVERIFIED** until a
-real Cloudflare account exists (D6).
+(rollback line) and the consumer lane's guarantees list (peer message, 2026-10-29). Exact wording of what a host call returns was **UNVERIFIED** until a
+real Cloudflare account existed (D6); the PM's real runs on 2026-11-08 and 2026-11-09 closed it for the plain-Worker shapes (`docs/CLOUDFLARE-FACTS.md`).
 
 ## Hello-world first
 
@@ -43,5 +43,5 @@ ran. Neither can a conformance check say "rollback works".
 ## Ruled by the PM, 2026-10-29
 
 - Keep `Unknown`: after a failed or unverifiable restore the state is genuinely unknown, and `Failed` would claim knowledge we lack. It carries a `reason` (and `details`, the names that differed, when the read-back ran).
-- Adapters that cannot snapshot declare `Op::Restore` = `No`; `Plan` then prints "this target cannot undo these changes" and `apply` returns no rollback point. The Cloudflare adapter now reads the deployed version id at the snapshot and rolls back to it (0.0.39; the Render adapter still declares `No`). What the Cloudflare restore does not undo: data in any store, a container's image or instances (UNVERIFIED), a secret's old value (only which names exist is checked), domain bindings.
+- Adapters that cannot snapshot declare `Op::Restore` = `No`; `Plan` then prints "this target cannot undo these changes" and `apply` returns no rollback point. The Cloudflare adapter now reads the deployed version id at the snapshot and rolls back to it (0.0.39; the Render adapter rolls back to the previous deploy since 0.0.41, see `docs/SECOND-HOST.md`; it is `Unverified` until opted in). What the Cloudflare restore does not undo: data in any store, a container's image or instances (UNVERIFIED), a secret's old value (only which names exist is checked), domain bindings.
 - Not covered here: TLS read-back, host-call timeouts. Both are separate slices.
