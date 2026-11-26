@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.0.69] — docs: design docs state what is built (claim-to-command audit 2)
+
+DOMAINS-DESIGN, ROLLBACK-DESIGN, DATA-AFTER-ROLLBACK-DESIGN, EDGE-AND-AGNOSTICISM, TLS-NEED-LIST and CONSUMER-CONTRACT no longer say nothing is built; each status line now says what exists and what has never run for real. Docs only; every claim was checked against the code at 54d8019.
+
 ## [0.0.68] — ROADMAP C9 and README state what is true now
 
 The C9 row says the workflow exists (dispatch only, never run) and what it still waits on: a registered runner, the secret and the variable. Documentation only.
