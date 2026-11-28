@@ -4,10 +4,12 @@ Written 2026-10-31 by the WebHostAnt lane, against WebHostAnt `origin/main` `ee3
 README: an `https://` URL is an error). For the HTTPAnt lane and the PM. **Needs, not a design.** WebHostAnt would be the client's first consumer.
 Facts about Cloudflare's API are UNVERIFIED (`docs/CLOUDFLARE-FACTS.md`: the endpoint paths were never read).
 
-## Hello-world first (what WebHostAnt would write)
+**Status (2026-11-26, checked against `Cargo.toml` and HTTPAnt `origin/main` 0.9.2): this note is answered.** HTTPAnt's client now does https (feature `https`, rustls, bundled roots, `add_root_pem`, OS store opt-in, redirects off by default, `refuse_private_addresses`). WebHostAnt depends on `httpant-client` 0.7.10 with that feature and uses it in `src/cloudflare_domains.rs` and `src/probe.rs`. The header and the sketch below are the 2026-10-31 state, kept as the record of what was asked; the table was not re-checked row by row against the client.
+
+## Hello-world first (what WebHostAnt wrote the need from)
 
 ```rust
-// Intended, not built. Two uses: ask Cloudflare's API, and probe the deployed app's health path.
+// Sketch from 2026-10-31, before the client existed (not the code now). Two uses: ask Cloudflare's API, and probe the deployed app's health path.
 let api = httpant::Client::builder().timeout(Duration::from_secs(30)).build()?;
 let r = api.get("https://api.cloudflare.com/client/v4/accounts/ID/workers/domains")
     .bearer(token)                          // token from SecretAnt; never in a URL, log or error
